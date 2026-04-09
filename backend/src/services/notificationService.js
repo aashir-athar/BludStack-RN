@@ -1,0 +1,144 @@
+// src/services/notificationService.js
+'use strict';
+
+const { Expo } = require('expo-server-sdk');
+
+const expo = new Expo({ useFcmV1: true });
+
+/**
+ * Send push notifications to a list of Expo push tokens.
+ *
+ * @param {Array<{
+ *   token: string,
+ *   title: string,
+ *   body: string,
+ *   data?: object,
+ *   sound?: string,
+ *   badge?: number,
+ *   channelId?: string,
+ * }>} messages
+ * @returns {Promise<{ sent: number, failed: number, errors: any[] }>}
+ */
+async function sendPushNotifications(messages) {
+  const results = { sent: 0, failed: 0, errors: [] };
+
+  // Build valid Expo messages
+  const expoMessages = [];
+
+  for (const msg of messages) {
+    if (!Expo.isExpoPushToken(msg.token)) {
+      console.warn(`[notify] Invalid Expo push token: ${msg.token}`);
+      results.failed++;
+      continue;
+    }
+
+    expoMessages.push({
+      to:        msg.token,
+      sound:     msg.sound ?? 'default',
+      title:     msg.title,
+      body:      msg.body,
+      data:      msg.data ?? {},
+      badge:     msg.badge ?? 1,
+      channelId: msg.channelId ?? 'default',
+      priority:  msg.channelId === 'emergency' ? 'high' : 'normal',
+    });
+  }
+
+  if (expoMessages.length === 0) return results;
+
+  // Expo recommends chunking into batches of 100
+  const chunks = expo.chunkPushNotifications(expoMessages);
+
+  for (const chunk of chunks) {
+    try {
+      const ticketChunk = await expo.sendPushNotificationsAsync(chunk);
+
+      for (const ticket of ticketChunk) {
+        if (ticket.status === 'ok') {
+          results.sent++;
+        } else {
+          results.failed++;
+          results.errors.push(ticket.message ?? ticket.details);
+
+          if (ticket.details?.error === 'DeviceNotRegistered') {
+            // Token is stale — caller should remove it from DB
+            console.warn('[notify] DeviceNotRegistered:', ticket.message);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[notify] Chunk send error:', err.message);
+      results.failed += chunk.length;
+      results.errors.push(err.message);
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Build and send an emergency blood request notification to a single donor.
+ */
+async function notifyDonor({ token, bloodGroup, urgency, hospitalName, distanceKm, requestId }) {
+  const urgencyLabels = { critical: '🚨 CRITICAL', urgent: '⚠️ Urgent', standard: '🩸 Request' };
+  const label         = urgencyLabels[urgency] ?? '🩸 Request';
+
+  return sendPushNotifications([{
+    token,
+    title:     `${label}: ${bloodGroup} Blood Needed`,
+    body:      `${hospitalName} · ${distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} km`} away. Can you help?`,
+    data:      { type: 'BLOOD_REQUEST', requestId, screen: 'request_detail' },
+    channelId: urgency === 'critical' ? 'emergency' : 'default',
+    sound:     'default',
+  }]);
+}
+
+/**
+ * Notify recipient that a donor has accepted their request.
+ */
+async function notifyRecipientDonorAccepted({ token, donorName, bloodGroup, requestId }) {
+  return sendPushNotifications([{
+    token,
+    title:     `✅ Donor on the way!`,
+    body:      `${donorName} (${bloodGroup}) has accepted your request and is heading to the hospital.`,
+    data:      { type: 'DONOR_ACCEPTED', requestId, screen: 'request_detail' },
+    channelId: 'default',
+    sound:     'default',
+  }]);
+}
+
+/**
+ * Notify donor that the donation was marked as completed.
+ */
+async function notifyDonorDonationComplete({ token, donorName, totalDonations, requestId }) {
+  return sendPushNotifications([{
+    token,
+    title:     `🎉 Donation recorded — thank you, ${donorName}!`,
+    body:      `You've now completed ${totalDonations} donation${totalDonations !== 1 ? 's' : ''}. You are a hero.`,
+    data:      { type: 'DONATION_COMPLETE', requestId },
+    channelId: 'default',
+    sound:     'default',
+  }]);
+}
+
+/**
+ * Notify recipient that their request is still unfulfilled (reminder).
+ */
+async function notifyRequestStillOpen({ token, bloodGroup, requestId, ringKm }) {
+  return sendPushNotifications([{
+    token,
+    title:     `🩸 Still searching for ${bloodGroup} donors…`,
+    body:      `We've expanded the search to ${ringKm} km. Stay hopeful — help is coming.`,
+    data:      { type: 'SEARCH_EXPANDING', requestId, ringKm },
+    channelId: 'default',
+    sound:     'default',
+  }]);
+}
+
+module.exports = {
+  sendPushNotifications,
+  notifyDonor,
+  notifyRecipientDonorAccepted,
+  notifyDonorDonationComplete,
+  notifyRequestStillOpen,
+};
