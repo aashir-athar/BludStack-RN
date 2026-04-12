@@ -1,0 +1,22 @@
+node_modules/
+.env
+.env.local
+.env.example
+*.log
+dist/
+coverage/
+.DS_Store
+
+node_modules/
+.expo/
+dist/
+web-build/
+.env.local
+.env
+*.local
+ios/
+android/
+.DS_Store
+*.log
+expo-env.d.ts
+# @end expo-cli
