@@ -46,6 +46,38 @@ async function acceptRequest(req, res, next) {
       }
     }
 
+    // 3b. FIX #1: Check if donor already responded to THIS specific request
+    const { data: existingResponse } = await supabaseAdmin
+      .from('request_responses')
+      .select('id, status')
+      .eq('request_id', requestId)
+      .eq('donor_id', req.userId)
+      .maybeSingle();
+
+    if (existingResponse?.status === 'accepted') {
+      return error(res, 'You have already accepted this request. Please head to the hospital.', 409);
+    }
+    if (existingResponse?.status === 'completed') {
+      return error(res, 'This donation has already been completed.', 409);
+    }
+
+    // FIX #10: Check if request already has enough donors (units_needed = number of donors)
+    const { data: reqDetails } = await supabaseAdmin
+      .from('blood_requests')
+      .select('units_needed')
+      .eq('id', requestId)
+      .single();
+
+    const { count: acceptedCount } = await supabaseAdmin
+      .from('request_responses')
+      .select('id', { count: 'exact', head: true })
+      .eq('request_id', requestId)
+      .eq('status', 'accepted');
+
+    if (reqDetails?.units_needed && acceptedCount >= reqDetails.units_needed) {
+      return error(res, `This request already has enough donors (${reqDetails.units_needed} needed, ${acceptedCount} accepted).`, 409);
+    }
+
     // 4. Upsert response record
     const { data: response, error: respErr } = await supabaseAdmin
       .from('request_responses')
@@ -136,7 +168,7 @@ async function completeDonation(req, res, next) {
     if (request.recipient_id !== req.userId) return error(res, 'Not authorised', 403);
     if (request.status !== 'active')       return error(res, `Request is already ${request.status}`, 409);
 
-    // 2. Verify the donor_id has an accepted response
+    // 2. FIX #8: Verify the donor_id has an accepted response (not already completed)
     const { data: response } = await supabaseAdmin
       .from('request_responses')
       .select('id, status')
@@ -144,8 +176,15 @@ async function completeDonation(req, res, next) {
       .eq('donor_id', donorId)
       .single();
 
-    if (!response || response.status !== 'accepted') {
+    if (!response) {
       return error(res, 'Donor has not accepted this request', 400);
+    }
+    if (response.status === 'completed') {
+      // FIX #8: Idempotent — already completed, return success without double-incrementing
+      return success(res, { requestId, donorId }, 'Donation was already recorded.');
+    }
+    if (response.status !== 'accepted') {
+      return error(res, `Cannot complete: donor response status is "${response.status}"`, 400);
     }
 
     // 3. Fetch donor's current stats
