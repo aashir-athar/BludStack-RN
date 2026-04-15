@@ -23,9 +23,10 @@ async function acceptRequest(req, res, next) {
       .from('blood_requests')
       .select('id, status, blood_group, hospital_name, recipient_id')
       .eq('id', requestId)
-      .single();
+      .maybeSingle();
 
-    if (reqErr || !request)        return error(res, 'Request not found', 404);
+    if (reqErr) throw reqErr;           // real DB error — surface it
+    if (!request) return error(res, 'Request not found', 404);
     if (request.status !== 'active') return error(res, `Request is ${request.status}`, 409);
     if (request.recipient_id === req.userId) return error(res, 'You cannot donate to your own request', 400);
 
@@ -66,7 +67,7 @@ async function acceptRequest(req, res, next) {
       .from('blood_requests')
       .select('units_needed')
       .eq('id', requestId)
-      .single();
+      .maybeSingle();
 
     const { count: acceptedCount } = await supabaseAdmin
       .from('request_responses')
@@ -83,8 +84,8 @@ async function acceptRequest(req, res, next) {
       .from('request_responses')
       .upsert({
         request_id: requestId,
-        donor_id:   req.userId,
-        status:     'accepted',
+        donor_id: req.userId,
+        status: 'accepted',
       }, { onConflict: 'request_id,donor_id' })
       .select()
       .single();
@@ -100,8 +101,8 @@ async function acceptRequest(req, res, next) {
 
     if (recipientProfile?.push_token) {
       await notifyRecipientDonorAccepted({
-        token:      recipientProfile.push_token,
-        donorName:  donorProfile.full_name,
+        token: recipientProfile.push_token,
+        donorName: donorProfile.full_name,
         bloodGroup: donorProfile.blood_group,
         requestId,
       });
@@ -113,9 +114,9 @@ async function acceptRequest(req, res, next) {
     return success(res, {
       response,
       request: {
-        id:           request.id,
+        id: request.id,
         hospital_name: request.hospital_name,
-        blood_group:  request.blood_group,
+        blood_group: request.blood_group,
       },
     }, 'You have accepted the request. Please head to the hospital as soon as possible.');
   } catch (err) {
@@ -136,8 +137,8 @@ async function declineRequest(req, res, next) {
       .from('request_responses')
       .upsert({
         request_id: requestId,
-        donor_id:   req.userId,
-        status:     'declined',
+        donor_id: req.userId,
+        status: 'declined',
       }, { onConflict: 'request_id,donor_id' });
 
     if (dbErr) throw dbErr;
@@ -164,9 +165,9 @@ async function completeDonation(req, res, next) {
       .eq('id', requestId)
       .single();
 
-    if (!request)                          return error(res, 'Request not found', 404);
+    if (!request) return error(res, 'Request not found', 404);
     if (request.recipient_id !== req.userId) return error(res, 'Not authorised', 403);
-    if (request.status !== 'active')       return error(res, `Request is already ${request.status}`, 409);
+    if (request.status !== 'active') return error(res, `Request is already ${request.status}`, 409);
 
     // 2. FIX #8: Verify the donor_id has an accepted response (not already completed)
     const { data: response } = await supabaseAdmin
@@ -211,7 +212,7 @@ async function completeDonation(req, res, next) {
       supabaseAdmin
         .from('profiles')
         .update({
-          total_donations:    newTotal,
+          total_donations: newTotal,
           last_donation_date: new Date().toISOString(),
         })
         .eq('id', donorId),
@@ -219,13 +220,13 @@ async function completeDonation(req, res, next) {
 
     if (requestUpdate.error) throw requestUpdate.error;
     if (responseUpdate.error) throw responseUpdate.error;
-    if (donorUpdate.error)   throw donorUpdate.error;
+    if (donorUpdate.error) throw donorUpdate.error;
 
     // 5. Notify donor
     if (donorProfile.push_token) {
       await notifyDonorDonationComplete({
-        token:          donorProfile.push_token,
-        donorName:      donorProfile.full_name,
+        token: donorProfile.push_token,
+        donorName: donorProfile.full_name,
         totalDonations: newTotal,
         requestId,
       });
