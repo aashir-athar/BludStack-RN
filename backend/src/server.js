@@ -66,6 +66,18 @@ app.get('/health', (_req, res) => {
   });
 });
 
+// ── TEMPORARY: Debug env vars — REMOVE AFTER FIXING ──────────
+app.get('/debug-env', (_req, res) => {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  res.json({
+    SUPABASE_URL: process.env.SUPABASE_URL || '❌ missing',
+    SERVICE_ROLE_KEY_SET: !!key,
+    SERVICE_ROLE_KEY_LENGTH: key.length,
+    SERVICE_ROLE_KEY_PREVIEW: key ? `${key.slice(0, 20)}...${key.slice(-10)}` : '❌ missing',
+    NODE_ENV: process.env.NODE_ENV,
+  });
+});
+
 // ── API routes ────────────────────────────────────────────────
 app.use('/api/v1/auth',          authRoutes);
 app.use('/api/v1/profiles',      profileRoutes);
