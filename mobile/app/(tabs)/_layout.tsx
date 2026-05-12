@@ -32,11 +32,20 @@ type TabDef = {
   cta?: boolean;
 };
 
+// Visibility rules:
+//   • 'all'        → every authenticated user sees it.
+//   • 'donor'      → donor + both.
+//   • 'recipient'  → recipient + both.
+//
+// `my-requests` is intentionally 'all' even though donor-only is rare here:
+// the Request tab is 'all', so any user who can POST a request must be able
+// to see + manage what they posted. Hiding my-requests from donors created
+// a state where a donor could post and then never reach their post again.
 const ALL_TABS: readonly TabDef[] = [
   { name: 'index',        label: 'Home',     icon: 'home-outline',    iconActive: 'home',          role: 'donor' },
   { name: 'request',      label: 'Request',  icon: 'add-circle',      iconActive: 'add-circle',    role: 'all', cta: true },
   { name: 'donors',       label: 'Find',     icon: 'search-outline',  iconActive: 'search',        role: 'donor' },
-  { name: 'my-requests',  label: 'Requests', icon: 'list-outline',    iconActive: 'list',          role: 'recipient' },
+  { name: 'my-requests',  label: 'Requests', icon: 'list-outline',    iconActive: 'list',          role: 'all' },
   { name: 'history',      label: 'History',  icon: 'heart-outline',   iconActive: 'heart',         role: 'donor' },
   { name: 'profile',      label: 'Account',  icon: 'person-outline',  iconActive: 'person',        role: 'all' },
 ] as const;

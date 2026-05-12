@@ -1,32 +1,45 @@
 // app/(tabs)/donors.tsx
-import React, { useState, useCallback, useMemo } from 'react';
+// Lever: discovery, no nudge — exploration mode for donors. Pill filters,
+// map / list toggle, theme-tokenised throughout. Self-posted requests are
+// already excluded server-side AND client-side; this screen always shows
+// requests other people have posted.
+
+import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity,
-  FlatList, useWindowDimensions,
+  View, Text, StyleSheet, Pressable, useWindowDimensions, RefreshControl,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import MapView, { Marker, Circle, PROVIDER_DEFAULT } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from '@/hooks/useLocation';
-import { useNearbyRequests, BloodRequest } from '@/hooks/useRequests';
+import { useNearbyRequests, type BloodRequest } from '@/hooks/useRequests';
 import RequestCard from '@/components/RequestCard';
-import BloodGroupBadge from '@/components/BloodGroupBadge';
 import SelectSheet from '@/components/SelectSheet';
 import EmptyState from '@/components/EmptyState';
-import { FontSize, FontWeight, Spacing, Radius, LetterSpacing } from '@/constants/Typography';
-import { BLOOD_GROUPS, URGENCY_CONFIG, UrgencyLevel } from '@/constants/BloodData';
-import { getBloodGroupColor } from '@/utils/helpers';
+import {
+  FontSize, FontWeight, Spacing, Radius, LetterSpacing,
+  TAB_BAR_BOTTOM_INSET, Elevation,
+} from '@/constants/Typography';
+import { BLOOD_GROUPS, type UrgencyLevel } from '@/constants/BloodData';
 import { deltaFromKm } from '@/utils/geo';
 
 type ViewMode = 'list' | 'map';
 
+const URGENCY_LABEL: Record<UrgencyLevel | 'All', string> = {
+  All:      'All urgency',
+  critical: 'Critical',
+  urgent:   'Urgent',
+  standard: 'Standard',
+};
+
 export default function DonorsScreen() {
   const { theme, isDark } = useTheme();
-  const { profile } = useAuth();
-  const router   = useRouter();
-  const insets   = useSafeAreaInsets();
+  const router  = useRouter();
+  const insets  = useSafeAreaInsets();
   const { height } = useWindowDimensions();
 
   const { location, refreshLocation } = useLocation(true);
@@ -36,8 +49,8 @@ export default function DonorsScreen() {
   );
 
   const [viewMode, setViewMode]             = useState<ViewMode>('list');
-  const [filterBlood, setFilterBlood]       = useState('All');
-  const [filterUrgency, setFilterUrgency]   = useState('All');
+  const [filterBlood, setFilterBlood]       = useState<string>('All');
+  const [filterUrgency, setFilterUrgency]   = useState<string>('All');
   const [bloodVisible, setBloodVisible]     = useState(false);
   const [urgencyVisible, setUrgencyVisible] = useState(false);
 
@@ -48,92 +61,144 @@ export default function DonorsScreen() {
   }), [requests, filterBlood, filterUrgency]);
 
   const mapRegion = useMemo(() => location ? {
-    latitude: location.latitude, longitude: location.longitude,
-    latitudeDelta: deltaFromKm(25), longitudeDelta: deltaFromKm(25),
+    latitude:       location.latitude,
+    longitude:      location.longitude,
+    latitudeDelta:  deltaFromKm(25),
+    longitudeDelta: deltaFromKm(25),
   } : undefined, [location]);
+
+  const onCardPress = useCallback((r: BloodRequest) => {
+    Haptics.selectionAsync().catch(() => {});
+    router.push(`/request/${r.id}` as any);
+  }, [router]);
+
+  const onModeChange = useCallback((m: ViewMode) => {
+    Haptics.selectionAsync().catch(() => {});
+    setViewMode(m);
+  }, []);
+
+  const openBlood   = useCallback(() => { Haptics.selectionAsync().catch(() => {}); setBloodVisible(true); }, []);
+  const openUrgency = useCallback(() => { Haptics.selectionAsync().catch(() => {}); setUrgencyVisible(true); }, []);
 
   const renderItem = useCallback(({ item }: { item: BloodRequest }) => (
     <RequestCard
       request={item}
-      userLat={location?.latitude}
-      userLon={location?.longitude}
-      onPress={r => router.push(`/request/${r.id}`)}
+      userLat={location?.latitude ?? null}
+      userLon={location?.longitude ?? null}
+      onPress={onCardPress}
     />
-  ), [location, router]);
+  ), [location?.latitude, location?.longitude, onCardPress]);
 
   const keyExtractor = useCallback((item: BloodRequest) => item.id, []);
 
-  const bloodOptions = [
-    { label: 'All Groups', value: 'All' },
+  const clearFilters = useCallback(() => {
+    Haptics.selectionAsync().catch(() => {});
+    setFilterBlood('All');
+    setFilterUrgency('All');
+  }, []);
+
+  const bloodOptions = useMemo(() => [
+    { label: 'All groups', value: 'All' },
     ...BLOOD_GROUPS.map(bg => ({ label: bg, value: bg })),
-  ];
-  const urgencyOptions = [
-    { label: 'All Urgency', value: 'All' },
-    { label: 'Critical', value: 'critical', description: 'Needed within 30 min' },
-    { label: 'Urgent',   value: 'urgent',   description: 'Needed within 2 hours' },
-    { label: 'Standard', value: 'standard', description: 'Scheduled donation' },
-  ];
+  ], []);
+
+  const urgencyOptions = useMemo(() => [
+    { label: 'All urgency', value: 'All' },
+    { label: 'Critical',    value: 'critical', description: 'Within 30 minutes' },
+    { label: 'Urgent',      value: 'urgent',   description: 'Within 2 hours' },
+    { label: 'Standard',    value: 'standard', description: 'Scheduled' },
+  ], []);
 
   const hasFilters = filterBlood !== 'All' || filterUrgency !== 'All';
 
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
-
-      {/* ── Top bar ── */}
-      <View style={[styles.topBar, { paddingTop: insets.top + Spacing[4], backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
-        <View style={styles.topRow}>
-          <View>
-            <Text style={[styles.pageTitle, { color: theme.textPrimary }]}>Find Requests</Text>
-            <Text style={[styles.pageSubtitle, { color: theme.textMuted }]}>
+      {/* Header */}
+      <View
+        style={[
+          styles.header,
+          {
+            paddingTop: insets.top + Spacing[4],
+            backgroundColor: theme.surface,
+            borderBottomColor: theme.border,
+          },
+        ]}
+      >
+        <View style={styles.headerRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>Discover · Nearby</Text>
+            <Text style={[styles.title, { color: theme.textPrimary }]}>Find requests</Text>
+            <Text style={[styles.subtitle, { color: theme.textMuted }]}>
               {filtered.length} active near you
             </Text>
           </View>
-          {/* Map / List toggle */}
-          <View style={[styles.toggleWrap, { backgroundColor: theme.cardElevated }]}>
-            {(['list', 'map'] as ViewMode[]).map(m => (
-              <TouchableOpacity
-                key={m}
-                onPress={() => setViewMode(m)}
-                style={[styles.toggleBtn, viewMode === m && { backgroundColor: theme.textPrimary }]}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.toggleLabel, { color: viewMode === m ? theme.textInverse : theme.textMuted }]}>
-                  {m === 'list' ? '≡ List' : '◎ Map'}
-                </Text>
-              </TouchableOpacity>
-            ))}
+          <View style={[styles.toggleWrap, { backgroundColor: theme.cardElevated, borderColor: theme.border }]}>
+            {(['list', 'map'] as ViewMode[]).map(m => {
+              const active = viewMode === m;
+              return (
+                <Pressable
+                  key={m}
+                  onPress={() => onModeChange(m)}
+                  style={[
+                    styles.toggleBtn,
+                    active && { backgroundColor: theme.textPrimary },
+                  ]}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={m}
+                >
+                  <Ionicons
+                    name={m === 'list' ? 'list' : 'map'}
+                    size={14}
+                    color={active ? theme.textInverse : theme.textMuted}
+                  />
+                  <Text style={[
+                    styles.toggleLabel,
+                    { color: active ? theme.textInverse : theme.textMuted },
+                  ]}>
+                    {m === 'list' ? 'List' : 'Map'}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
 
-        {/* Filter chips */}
         <View style={styles.filters}>
           <FilterChip
-            label={filterBlood === 'All' ? 'Blood Group' : filterBlood}
+            iconName="water"
+            label={filterBlood === 'All' ? 'Blood group' : filterBlood}
             active={filterBlood !== 'All'}
-            onPress={() => setBloodVisible(true)}
+            onPress={openBlood}
             theme={theme}
           />
           <FilterChip
-            label={filterUrgency === 'All' ? 'Urgency' : URGENCY_CONFIG[filterUrgency as UrgencyLevel].label}
+            iconName="flash-outline"
+            label={URGENCY_LABEL[(filterUrgency as UrgencyLevel | 'All')]}
             active={filterUrgency !== 'All'}
-            onPress={() => setUrgencyVisible(true)}
+            onPress={openUrgency}
             theme={theme}
           />
           {hasFilters && (
-            <TouchableOpacity
-              onPress={() => { setFilterBlood('All'); setFilterUrgency('All'); }}
-              style={[styles.clearChip, { borderColor: theme.border }]}
-              activeOpacity={0.7}
+            <Pressable
+              onPress={clearFilters}
+              style={({ pressed }) => [
+                styles.clearChip,
+                { borderColor: theme.border, opacity: pressed ? 0.85 : 1 },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Clear filters"
             >
-              <Text style={[styles.clearLabel, { color: theme.textMuted }]}>✕ Clear</Text>
-            </TouchableOpacity>
+              <Ionicons name="close" size={14} color={theme.textMuted} />
+              <Text style={[styles.clearLabel, { color: theme.textMuted }]}>Clear</Text>
+            </Pressable>
           )}
         </View>
       </View>
 
-      {/* ── Map view ── */}
+      {/* Map */}
       {viewMode === 'map' && location && (
-        <View style={{ height: height * 0.45 }}>
+        <View style={[styles.mapWrap, { height: height * 0.42 }]}>
           <MapView
             style={StyleSheet.absoluteFill}
             provider={PROVIDER_DEFAULT}
@@ -147,7 +212,7 @@ export default function DonorsScreen() {
                 key={km}
                 center={{ latitude: location.latitude, longitude: location.longitude }}
                 radius={km * 1000}
-                strokeColor={`${theme.textSecondary}30`}
+                strokeColor={theme.border}
                 fillColor="transparent"
                 strokeWidth={1}
               />
@@ -156,10 +221,12 @@ export default function DonorsScreen() {
               <Marker
                 key={req.id}
                 coordinate={{ latitude: req.latitude, longitude: req.longitude }}
-                onPress={() => router.push(`/request/${req.id}`)}
+                onPress={() => onCardPress(req)}
               >
-                <View style={[styles.mapMarker, { backgroundColor: getBloodGroupColor(req.blood_group) }]}>
-                  <Text style={styles.mapMarkerText}>{req.blood_group}</Text>
+                <View style={[styles.mapPin, { backgroundColor: theme.primary }]}>
+                  <Text style={[styles.mapPinText, { color: theme.textOnPrimary }]}>
+                    {req.blood_group}
+                  </Text>
                 </View>
               </Marker>
             ))}
@@ -167,80 +234,157 @@ export default function DonorsScreen() {
         </View>
       )}
 
-      {/* ── List ── */}
-      <FlatList
+      {/* List */}
+      <FlashList
         data={filtered}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
-        contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + Spacing[12] }]}
+        getItemType={() => 'request'}
+        contentContainerStyle={{
+          paddingHorizontal: Spacing[5],
+          paddingTop: Spacing[5],
+          paddingBottom: TAB_BAR_BOTTOM_INSET + Spacing[4],
+        }}
         showsVerticalScrollIndicator={false}
-        onRefresh={refetch}
-        refreshing={loading}
+        refreshControl={
+          <RefreshControl
+            refreshing={false}
+            onRefresh={refetch}
+            tintColor="transparent"
+            colors={['transparent']}
+            progressBackgroundColor="transparent"
+            progressViewOffset={-1000}
+          />
+        }
         ListEmptyComponent={
           <EmptyState
-            icon="🔍"
-            title="No requests match"
-            description="Try different filters or check back soon."
-            actionLabel={hasFilters ? 'Clear filters' : undefined}
-            onAction={hasFilters ? () => { setFilterBlood('All'); setFilterUrgency('All'); } : undefined}
+            iconName={hasFilters ? 'filter-outline' : 'search'}
+            title={hasFilters ? 'No requests match those filters' : 'No requests near you'}
+            description={
+              hasFilters
+                ? 'Widen the search or clear the filters to see more.'
+                : "We'll ping you the moment a compatible request lands."
+            }
+            actionLabel={hasFilters ? 'Reset filters' : undefined}
+            onAction={hasFilters ? clearFilters : undefined}
           />
         }
       />
 
       <SelectSheet
         visible={bloodVisible}
-        title="Filter by Blood Group"
+        title="Filter by blood group"
         options={bloodOptions}
-        selected={filterBlood}
-        onSelect={setFilterBlood}
+        value={filterBlood}
+        onSelect={(v: string) => setFilterBlood(v)}
         onClose={() => setBloodVisible(false)}
       />
       <SelectSheet
         visible={urgencyVisible}
-        title="Filter by Urgency"
+        title="Filter by urgency"
         options={urgencyOptions}
-        selected={filterUrgency}
-        onSelect={setFilterUrgency}
+        value={filterUrgency}
+        onSelect={(v: string) => setFilterUrgency(v)}
         onClose={() => setUrgencyVisible(false)}
       />
     </View>
   );
 }
 
-function FilterChip({ label, active, onPress, theme }: {
+const FilterChip = React.memo(function FilterChip({
+  iconName, label, active, onPress, theme,
+}: {
+  iconName: keyof typeof Ionicons.glyphMap;
   label: string; active: boolean; onPress: () => void; theme: any;
 }) {
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onPress}
-      activeOpacity={0.7}
-      style={[styles.chip, {
-        backgroundColor: active ? theme.textPrimary : theme.card,
-        borderColor:     active ? theme.textPrimary : theme.border,
-      }]}
+      style={({ pressed }) => [
+        styles.chip,
+        {
+          backgroundColor: active ? theme.textPrimary : theme.cardElevated,
+          borderColor:     active ? theme.textPrimary : theme.border,
+          opacity: pressed ? 0.92 : 1,
+        },
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={label}
     >
-      <Text style={[styles.chipLabel, { color: active ? theme.textInverse : theme.textSecondary }]}>
-        {label}
-      </Text>
-    </TouchableOpacity>
+      <Ionicons
+        name={iconName}
+        size={14}
+        color={active ? theme.textInverse : theme.textPrimary}
+      />
+      <Text style={[
+        styles.chipLabel,
+        { color: active ? theme.textInverse : theme.textPrimary },
+      ]}>{label}</Text>
+    </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
-  root:         { flex: 1 },
-  topBar:       { paddingHorizontal: Spacing[5], paddingBottom: Spacing[3], borderBottomWidth: StyleSheet.hairlineWidth },
-  topRow:       { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: Spacing[3] },
-  pageTitle:    { fontSize: FontSize.xl, fontWeight: FontWeight.black, letterSpacing: LetterSpacing.tight },
-  pageSubtitle: { fontSize: FontSize.xs, marginTop: 2 },
-  toggleWrap:   { flexDirection: 'row', borderRadius: Radius.xs, overflow: 'hidden', padding: 2 },
-  toggleBtn:    { paddingHorizontal: Spacing[3], paddingVertical: Spacing[1], borderRadius: Radius.xs - 2 },
-  toggleLabel:  { fontSize: FontSize.xs, fontWeight: FontWeight.bold },
-  filters:      { flexDirection: 'row', gap: Spacing[2], flexWrap: 'wrap' },
-  chip:         { paddingHorizontal: Spacing[3], paddingVertical: Spacing[1], borderRadius: Radius.full, borderWidth: StyleSheet.hairlineWidth },
-  chipLabel:    { fontSize: FontSize.xs, fontWeight: FontWeight.bold, letterSpacing: LetterSpacing.wide },
-  clearChip:    { paddingHorizontal: Spacing[3], paddingVertical: Spacing[1], borderRadius: Radius.full, borderWidth: StyleSheet.hairlineWidth },
-  clearLabel:   { fontSize: FontSize.xs, fontWeight: FontWeight.medium },
-  list:         { padding: Spacing[5] },
-  mapMarker:    { paddingHorizontal: Spacing[2], paddingVertical: 3, borderRadius: Radius.xs },
-  mapMarkerText:{ color: '#fff', fontSize: FontSize.xs, fontWeight: FontWeight.black },
+  root: { flex: 1 },
+  header: {
+    paddingHorizontal: Spacing[5],
+    paddingBottom: Spacing[4],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: Spacing[4],
+  },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing[3] },
+  sectionLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.black,
+    letterSpacing: LetterSpacing.widest,
+    textTransform: 'uppercase',
+    marginBottom: Spacing[1],
+  },
+  title: {
+    fontSize: FontSize['2xl'], fontWeight: FontWeight.black,
+    letterSpacing: LetterSpacing.tighter,
+  },
+  subtitle: { fontSize: FontSize.xs, marginTop: 2, fontWeight: FontWeight.semibold },
+
+  toggleWrap: {
+    flexDirection: 'row',
+    borderRadius: Radius.pill,
+    padding: 3,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  toggleBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: Spacing[3], paddingVertical: Spacing[1],
+    borderRadius: Radius.pill,
+  },
+  toggleLabel: { fontSize: FontSize.xs, fontWeight: FontWeight.bold, letterSpacing: LetterSpacing.snug },
+
+  filters: { flexDirection: 'row', gap: Spacing[2], flexWrap: 'wrap' },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: Spacing[3], paddingVertical: Spacing[2],
+    borderRadius: Radius.pill, borderWidth: 1.5,
+  },
+  chipLabel: { fontSize: FontSize.xs, fontWeight: FontWeight.bold, letterSpacing: LetterSpacing.snug },
+  clearChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: Spacing[3], paddingVertical: Spacing[2],
+    borderRadius: Radius.pill, borderWidth: StyleSheet.hairlineWidth,
+  },
+  clearLabel: { fontSize: FontSize.xs, fontWeight: FontWeight.semibold },
+
+  mapWrap: {
+    marginHorizontal: Spacing[4],
+    marginTop: Spacing[4],
+    borderRadius: Radius.xl,
+    overflow: 'hidden',
+  },
+  mapPin: {
+    paddingHorizontal: Spacing[2], paddingVertical: 4,
+    borderRadius: Radius.pill,
+  },
+  mapPinText: {
+    fontSize: FontSize.xs, fontWeight: FontWeight.black,
+    letterSpacing: LetterSpacing.snug,
+  },
 });

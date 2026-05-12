@@ -33,7 +33,7 @@ SplashScreen.preventAutoHideAsync();
 // Any segment[0] in this set is considered a valid "inside the app" location.
 // Without this, opening a deep link like /request/abc on cold start bounces the
 // user to (tabs) — destroying the link target.
-const IN_APP_SEGMENTS = new Set(['(tabs)', 'request', 'donor', 'map', 'chat']);
+const IN_APP_SEGMENTS = new Set(['(tabs)', 'request', 'donor', 'map', 'chat', 'profile']);
 
 // ── Push-tap deep-link router ────────────────────────────────────────────────
 // Backend pushes carry `data.requestId` (and an optional `screen`). When the
@@ -179,6 +179,7 @@ function RootNavigator() {
         <Stack.Screen name="donor/[id]"   options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
         <Stack.Screen name="map/live"     options={{ headerShown: false, gestureEnabled: false }} />
         <Stack.Screen name="chat"         options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="profile/edit" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       </Stack>
     </>
   );

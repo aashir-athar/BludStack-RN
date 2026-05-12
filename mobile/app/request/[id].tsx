@@ -7,12 +7,14 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
+import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/utils/supabase';
 import { apiAcceptRequest, apiDeclineRequest, apiCompleteDonation, apiCancelRequest } from '@/utils/api';
 import { useToast } from '@/contexts/ToastContext';
+import { useDonorHeartbeat } from '@/hooks/useDonorHeartbeat';
 import { BloodRequest, RequestResponse } from '@/hooks/useRequests';
 import { useLocation } from '@/hooks/useLocation';
 import BloodGroupBadge from '@/components/BloodGroupBadge';
@@ -49,6 +51,18 @@ export default function RequestDetailScreen() {
   const [myResponse, setMyResponse]   = useState<RequestResponse | null>(null);
   const [loading, setLoading]         = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  // One-active-commitment guard: the OTHER request_id this donor is already
+  // committed to (accepted + parent request still active). When set, the
+  // Accept CTA on this screen is replaced by a warning pill explaining why.
+  const [otherCommitmentId, setOtherCommitmentId] = useState<string | null>(null);
+
+  // Push donor's live GPS to backend while accepted + request still active.
+  // The recipient watches this via realtime UPDATEs on request_responses and
+  // renders the moving pin on /map/live.
+  useDonorHeartbeat(
+    id,
+    myResponse?.status === 'accepted' && request?.status === 'active',
+  );
 
   // Pulse animation for urgent requests
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -112,9 +126,32 @@ export default function RequestDetailScreen() {
     }
   }, [id, user?.id]);
 
+  // Look up whether this donor is already committed to ANOTHER active request.
+  // The accept_blood_request RPC also enforces this server-side; we mirror it
+  // client-side so the UI shows a clear "you can't accept this yet" pill
+  // instead of letting the user tap Accept and read a server error.
+  const fetchOtherCommitment = useCallback(async () => {
+    if (!id || !user?.id) { setOtherCommitmentId(null); return; }
+    try {
+      const { data, error } = await supabase
+        .from('request_responses')
+        .select('request_id, blood_requests!inner(status)')
+        .eq('donor_id', user.id)
+        .eq('status', 'accepted')
+        .neq('request_id', id)
+        .eq('blood_requests.status', 'active')
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      setOtherCommitmentId((data as any)?.request_id ?? null);
+    } catch (e: any) {
+      console.warn('[fetchOtherCommitment]', e.message);
+    }
+  }, [id, user?.id]);
+
   useEffect(() => {
     if (!id) return;
-    Promise.all([fetchRequest(), fetchResponses()]).finally(() => setLoading(false));
+    Promise.all([fetchRequest(), fetchResponses(), fetchOtherCommitment()]).finally(() => setLoading(false));
 
     // Real-time responses subscription — unique channel to avoid collision
     const channelName = uniqueChannelName(`req_detail_${id}`);
@@ -129,35 +166,61 @@ export default function RequestDetailScreen() {
         event: 'UPDATE', schema: 'public',
         table: 'blood_requests',
         filter: `id=eq.${id}`,
-      }, () => { fetchRequest(); })
+      }, () => { fetchRequest(); fetchOtherCommitment(); })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
-  }, [id]); // stable — fetchRequest/fetchResponses are stable via useCallback with no-dep pattern
+    // Also watch ALL of this user's responses globally so the other-commitment
+    // guard updates the moment a prior commitment is completed/cancelled.
+    let myResponsesChannel: ReturnType<typeof supabase.channel> | null = null;
+    if (user?.id) {
+      myResponsesChannel = supabase
+        .channel(uniqueChannelName(`my_resps_${user.id}`))
+        .on('postgres_changes', {
+          event: '*', schema: 'public',
+          table: 'request_responses',
+          filter: `donor_id=eq.${user.id}`,
+        }, () => { fetchOtherCommitment(); })
+        .subscribe();
+    }
+
+    return () => {
+      supabase.removeChannel(channel);
+      if (myResponsesChannel) supabase.removeChannel(myResponsesChannel);
+    };
+  }, [id, user?.id]); // stable — fetchRequest/fetchResponses/fetchOtherCommitment via useCallback
+
+  const openMaps = useCallback(() => {
+    if (!request) return;
+    Linking.openURL(
+      `https://www.google.com/maps/dir/?api=1&destination=${request.latitude},${request.longitude}&travelmode=driving`
+    );
+  }, [request]);
 
   // ── ACCEPT: backend RPC validates cooldown + capacity atomically (flaw #8) ──
   const handleAccept = useCallback(async () => {
     if (!user?.id || !id) return;
     setActionLoading(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     try {
       await apiAcceptRequest(id);
       await fetchResponses();
       await fetchRequest();
       Alert.alert(
-        '🩸 Request Accepted!',
-        `You have committed to donating. The recipient will be notified. Please head to the hospital immediately.`,
-        [{ text: 'Get Directions', onPress: openMaps }, { text: 'OK', style: 'cancel' }],
+        "You're on the way",
+        `You committed to donating. The recipient is being notified. Head to ${request?.hospital_name ?? 'the hospital'} as soon as you can.`,
+        [{ text: 'Open directions', onPress: openMaps }, { text: 'Later', style: 'cancel' }],
       );
     } catch (e: any) {
       Alert.alert('Failed to accept', e?.message ?? 'Please check your connection and try again.');
     } finally {
       setActionLoading(false);
     }
-  }, [user?.id, id, fetchResponses, fetchRequest, openMaps]);
+  }, [user?.id, id, fetchResponses, fetchRequest, openMaps, request?.hospital_name]);
 
   const handleDecline = useCallback(async () => {
     if (!user?.id || !id) return;
     setActionLoading(true);
+    Haptics.selectionAsync().catch(() => {});
     try {
       await apiDeclineRequest(id);
       await fetchResponses();
@@ -184,12 +247,13 @@ export default function RequestDetailScreen() {
           text: 'Yes, Fulfilled',
           onPress: async () => {
             setActionLoading(true);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
             try {
               // Backend RPC: atomic flip request→fulfilled + response→completed
               // + donor.total_donations++ + donor.last_donation_date=now. Idempotent.
               await apiCompleteDonation(id, accepted.donor_id);
               await fetchRequest();
-              Alert.alert('🎉 Life Saved!', 'Donation recorded. Thank you for using BludStack.');
+              Alert.alert('Life saved', 'Donation recorded. Thank you for showing up.');
             } catch (e: any) {
               Alert.alert('Error', e?.message ?? 'Failed to mark fulfilled.');
             } finally {
@@ -201,29 +265,35 @@ export default function RequestDetailScreen() {
     );
   }, [id, user?.id, responses, fetchRequest]);
 
-  const openMaps = useCallback(() => {
-    if (!request) return;
-    Linking.openURL(
-      `https://www.google.com/maps/dir/?api=1&destination=${request.latitude},${request.longitude}&travelmode=driving`
-    );
-  }, [request]);
-
   const callContact = useCallback((contact: any) => {
     const phone = contact?.phone ?? contact?.email;
     if (phone) Linking.openURL(`tel:${phone}`);
   }, []);
 
+  // In-app chat scoped to this request — NEVER email. The mutual-commitment
+  // RLS guarantees both parties can resolve each other's profile, so the
+  // ProfileCard's Chat pill flows here without round-tripping a discovery query.
   const messageContact = useCallback((contact: any) => {
-    const email = contact?.email;
-    if (email) Linking.openURL(`mailto:${email}`);
-  }, []);
+    if (!contact?.id || !id) return;
+    Haptics.selectionAsync().catch(() => {});
+    router.push({
+      pathname: '/chat',
+      params: {
+        requestId:    String(id),
+        receiverId:   contact.id,
+        receiverName: encodeURIComponent(contact.full_name ?? 'User'),
+      },
+    } as any);
+  }, [id, router]);
 
   if (loading) return <LoadingScreen message="Loading request…" />;
   if (!request) return null;
 
   const urgencyColor  = URGENCY_COLORS[request.urgency] ?? '#E8002D';
   const urgencyConfig = URGENCY_CONFIG[request.urgency];
-  const isMyRequest   = request.recipient_id === user?.id;
+  // Defensive: if user.id hasn't hydrated yet (rare cold-start race), treat
+  // it as the recipient's request so we don't briefly render the accept CTA.
+  const isMyRequest   = !user?.id ? true : request.recipient_id === user.id;
 
   const distance = location
     ? haversineDistance(location.latitude, location.longitude, request.latitude, request.longitude)
@@ -249,7 +319,7 @@ export default function RequestDetailScreen() {
 
       {/* ── Top bar ── */}
       <View style={[styles.topBar, {
-        paddingTop: insets.top + Spacing[2],
+        paddingTop: Spacing[2],
         backgroundColor: theme.surface,
         borderBottomColor: theme.border,
       }]}>
@@ -358,7 +428,10 @@ export default function RequestDetailScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* ── Recipient info (shown to accepted donor) ── */}
+        {/* ── Recipient info (shown to accepted donor) ──
+            ProfileCard already exposes Call / WhatsApp / Chat pills — no
+            duplicate "Message recipient" button beneath it. Single chat
+            affordance per profile. */}
         {!isMyRequest && myResponse?.status === 'accepted' && request.recipient && (
           <Section title="Recipient" theme={theme}>
             <ProfileCard
@@ -367,21 +440,21 @@ export default function RequestDetailScreen() {
               onMessage={() => messageContact(request.recipient)}
             />
             <Button
-              label="Message recipient"
-              variant="secondary"
+              label="View full profile"
+              variant="outline"
               size="lg"
               fullWidth
-              icon={<Ionicons name="chatbubble-ellipses-outline" size={18} color={theme.textPrimary} />}
-              onPress={() => router.push({
-                pathname: '/chat',
-                params: {
-                  requestId: String(id),
-                  receiverId: (request.recipient as any)?.id ?? request.recipient_id,
-                  receiverName: encodeURIComponent((request.recipient as any)?.full_name ?? 'Recipient'),
-                },
-              } as any)}
+              icon={<Ionicons name="person-circle-outline" size={18} color={theme.textPrimary} />}
+              onPress={() => {
+                Haptics.selectionAsync().catch(() => {});
+                const rid = (request.recipient as any)?.id ?? request.recipient_id;
+                router.push({
+                  pathname: `/donor/${rid}` as any,
+                  params:   { requestId: String(id) },
+                } as any);
+              }}
               style={{ marginTop: Spacing[3] }}
-              accessibilityHint="Open chat with the recipient about this request"
+              accessibilityHint="Open the recipient's full profile"
             />
           </Section>
         )}
@@ -393,29 +466,81 @@ export default function RequestDetailScreen() {
             theme={theme}
           >
             {acceptedResponses.map(resp => resp.donor && (
-              <View key={resp.id} style={{ gap: Spacing[3], marginBottom: Spacing[3] }}>
+              <View key={resp.id} style={{ gap: Spacing[3], marginBottom: Spacing[4] }}>
                 <ProfileCard
                   profile={resp.donor as any}
                   onCall={() => callContact(resp.donor)}
                   onMessage={() => messageContact(resp.donor)}
                 />
+
+                {/* Per-donor heartbeat status pill (recipient view).
+                    Shows whether THIS specific donor is sharing live GPS. */}
+                {(resp as any).donor_lat != null ? (
+                  <View style={[styles.liveWaitPill, { backgroundColor: theme.successSoft, borderColor: theme.success }]}>
+                    <View style={[styles.liveWaitDot, { backgroundColor: theme.success }]} />
+                    <Text style={[styles.liveWaitText, { color: theme.success }]} numberOfLines={1}>
+                      Live · sharing GPS right now
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={[styles.liveWaitPill, { backgroundColor: theme.cardElevated, borderColor: theme.border }]}>
+                    <View style={[styles.liveWaitDot, { backgroundColor: theme.warning }]} />
+                    <Text style={[styles.liveWaitText, { color: theme.textMuted }]} numberOfLines={1}>
+                      Waiting for {(resp.donor as any).full_name?.split(' ')[0] ?? 'donor'} to share GPS
+                    </Text>
+                  </View>
+                )}
+
+                {/* No duplicate Message button — the ProfileCard's Chat pill
+                    already opens this thread via messageContact(). One chat
+                    affordance per profile. */}
                 <Button
-                  label={`Message ${(resp.donor as any).full_name?.split(' ')[0] ?? 'donor'}`}
-                  variant="secondary"
+                  label={`View ${(resp.donor as any).full_name?.split(' ')[0] ?? 'donor'}'s full profile`}
+                  variant="outline"
                   size="md"
                   fullWidth
-                  icon={<Ionicons name="chatbubble-ellipses-outline" size={16} color={theme.textPrimary} />}
-                  onPress={() => router.push({
-                    pathname: '/chat',
-                    params: {
-                      requestId: String(id),
-                      receiverId: (resp.donor as any).id,
-                      receiverName: encodeURIComponent((resp.donor as any).full_name ?? 'Donor'),
-                    },
-                  } as any)}
+                  icon={<Ionicons name="person-circle-outline" size={16} color={theme.textPrimary} />}
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    router.push({
+                      pathname: `/donor/${(resp.donor as any).id}` as any,
+                      params:   { requestId: String(id) },
+                    } as any);
+                  }}
+                  accessibilityHint="Open the donor's full profile including donation history"
                 />
               </View>
             ))}
+
+            {/* Live tracking — always render once a donor accepts (Uber-driver
+                UX). When a heartbeat exists, the button is primary; until then
+                we show a soft "waiting for GPS" pill so the recipient knows
+                tracking is wired and pending, not missing. */}
+            {(() => {
+              const hasHeartbeat = acceptedResponses.some(r => (r as any).donor_lat != null);
+              return hasHeartbeat ? (
+                <Button
+                  label="Track donor live"
+                  variant="primary"
+                  size="lg"
+                  fullWidth
+                  icon={<Ionicons name="navigate" size={18} color={theme.textOnPrimary} />}
+                  onPress={() => router.push({
+                    pathname: '/map/live',
+                    params: { requestId: String(id), role: 'recipient' },
+                  } as any)}
+                  style={{ marginTop: Spacing[2] }}
+                  accessibilityHint="Open the live map showing donor locations"
+                />
+              ) : (
+                <View style={[styles.liveWaitPill, { backgroundColor: theme.cardElevated, borderColor: theme.border, marginTop: Spacing[2] }]}>
+                  <View style={[styles.liveWaitDot, { backgroundColor: theme.warning }]} />
+                  <Text style={[styles.liveWaitText, { color: theme.textMuted }]} numberOfLines={1}>
+                    Waiting for donor's GPS · Live tracking starts when they share their location
+                  </Text>
+                </View>
+              );
+            })()}
           </Section>
         )}
 
@@ -444,7 +569,9 @@ export default function RequestDetailScreen() {
             )}
 
             {myResponse?.status === 'accepted' ? (
-              /* Already accepted — confirmation state + chat unlock (peak-end) */
+              /* Already accepted — confirmation state (peak-end). Contact
+                 affordances live ONCE in the Recipient section below; this
+                 block stays focused on the immediate physical action. */
               <View style={[styles.acceptedState, { backgroundColor: theme.successSoft, borderColor: theme.success }]}>
                 <View style={[styles.successBadge, { backgroundColor: theme.success }]}>
                   <Ionicons name="checkmark" size={22} color={theme.textOnPrimary} />
@@ -461,22 +588,6 @@ export default function RequestDetailScreen() {
                   size="lg"
                   icon={<Ionicons name="navigate-outline" size={18} color={theme.textOnPrimary} />}
                 />
-                <Button
-                  label="Message recipient"
-                  variant="secondary"
-                  size="lg"
-                  fullWidth
-                  icon={<Ionicons name="chatbubble-ellipses-outline" size={18} color={theme.textPrimary} />}
-                  onPress={() => router.push({
-                    pathname: '/chat',
-                    params: {
-                      requestId: String(id),
-                      receiverId: (request.recipient as any)?.id ?? request.recipient_id,
-                      receiverName: encodeURIComponent((request.recipient as any)?.full_name ?? 'Recipient'),
-                    },
-                  } as any)}
-                  accessibilityHint="Open chat with the recipient about this request"
-                />
               </View>
             ) : myResponse?.status === 'declined' ? (
               <View style={[styles.declinedState, { backgroundColor: theme.cardElevated }]}>
@@ -488,6 +599,37 @@ export default function RequestDetailScreen() {
                   variant="outline"
                   onPress={handleAccept}
                   loading={actionLoading}
+                  fullWidth
+                />
+              </View>
+            ) : otherCommitmentId ? (
+              /* One-active-commitment block: donor is already committed to
+                 a different active request and must complete or release that
+                 one before accepting another. Server enforces the same rule
+                 in accept_blood_request; this is the kinder UX path. */
+              <View style={styles.ctaBlock}>
+                <View style={[styles.warnBanner, { backgroundColor: theme.warningSoft, borderColor: theme.warning }]}>
+                  <Ionicons name="alert-circle" size={18} color={theme.warning} />
+                  <Text style={[styles.infoBannerText, { color: theme.textSecondary, marginLeft: Spacing[2] }]}>
+                    You're already on the way to another donation. Finish that one — or release it — before accepting a new request.
+                  </Text>
+                </View>
+                <Button
+                  label="Open my active commitment"
+                  variant="primary"
+                  size="xl"
+                  fullWidth
+                  icon={<Ionicons name="navigate" size={18} color={theme.textOnPrimary} />}
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    router.push(`/request/${otherCommitmentId}` as any);
+                  }}
+                />
+                <Button
+                  label="Not this time"
+                  variant="ghost"
+                  size="md"
+                  onPress={handleDecline}
                   fullWidth
                 />
               </View>
@@ -632,7 +774,7 @@ const styles = StyleSheet.create({
 
   scroll: { padding: Spacing[5], gap: Spacing[4] },
 
-  heroCard:   { borderRadius: Radius.md, borderWidth: 2, overflow: 'hidden' },
+  heroCard:   { borderRadius: Radius.xl, borderWidth: 2, overflow: 'hidden' },
   statusStripe: { height: 4 },
   heroInner:  { padding: Spacing[4], gap: Spacing[4] },
   heroTop:    { flexDirection: 'row', gap: Spacing[4], alignItems: 'flex-start' },
@@ -656,14 +798,14 @@ const styles = StyleSheet.create({
   etaValue:   { fontSize: FontSize.base, fontWeight: FontWeight.black },
   etaLabel:   { fontSize: FontSize['2xs'], fontWeight: FontWeight.bold, letterSpacing: LetterSpacing.widest, textTransform: 'uppercase', marginTop: 2 },
   etaDivider: { width: StyleSheet.hairlineWidth, height: 28 },
-  dirBtn:     { paddingHorizontal: Spacing[3], paddingVertical: Spacing[2], borderRadius: Radius.xs },
+  dirBtn:     { paddingHorizontal: Spacing[3], paddingVertical: Spacing[2], borderRadius: Radius.pill },
   dirBtnText: { color: '#fff', fontSize: FontSize.xs, fontWeight: FontWeight.black },
 
-  notesBox:   { padding: Spacing[3], borderRadius: Radius.xs, borderWidth: StyleSheet.hairlineWidth },
+  notesBox:   { padding: Spacing[3], borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth },
   notesLabel: { fontSize: FontSize['2xs'], fontWeight: FontWeight.black, letterSpacing: LetterSpacing.widest, textTransform: 'uppercase', marginBottom: Spacing[1] },
   notesText:  { fontSize: FontSize.sm, lineHeight: 20 },
 
-  mapCard:    { borderRadius: Radius.md, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden', height: 180 },
+  mapCard:    { borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden', height: 180 },
   map:        { ...StyleSheet.absoluteFillObject },
   mapOverlay: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
@@ -676,27 +818,34 @@ const styles = StyleSheet.create({
 
   infoBanner: {
     flexDirection: 'row', alignItems: 'flex-start', gap: Spacing[3],
-    padding: Spacing[3], borderRadius: Radius.sm, borderWidth: 1,
+    padding: Spacing[3], borderRadius: Radius.xl, borderWidth: 1,
   },
+  liveWaitPill: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing[2],
+    paddingHorizontal: Spacing[3], paddingVertical: Spacing[2],
+    borderRadius: Radius.pill, borderWidth: StyleSheet.hairlineWidth,
+  },
+  liveWaitDot: { width: 8, height: 8, borderRadius: 4 },
+  liveWaitText: { flex: 1, fontSize: FontSize.xs, fontWeight: FontWeight.semibold, letterSpacing: LetterSpacing.snug },
   infoBannerIcon: { fontSize: 18 },
   infoBannerText: { flex: 1, fontSize: FontSize.sm, lineHeight: 20 },
 
   warnBanner: {
     flexDirection: 'row', alignItems: 'flex-start', gap: Spacing[3],
-    padding: Spacing[3], borderRadius: Radius.sm, borderWidth: 1,
+    padding: Spacing[3], borderRadius: Radius.xl, borderWidth: 1,
   },
 
   actionWrap: { gap: Spacing[3] },
 
   ctaBlock: { gap: Spacing[3] },
   scarcityRow: {
-    padding: Spacing[3], borderRadius: Radius.sm, borderWidth: 1,
+    padding: Spacing[3], borderRadius: Radius.xl, borderWidth: 1,
   },
   scarcityText: { fontSize: FontSize.sm, fontWeight: FontWeight.semibold, lineHeight: 20 },
 
   acceptedState: {
     alignItems: 'center', gap: Spacing[3], padding: Spacing[5],
-    borderRadius: Radius.md, borderWidth: 1,
+    borderRadius: Radius.xl, borderWidth: 1,
   },
   acceptedEmoji: { fontSize: 40 },
   successBadge:  {
@@ -707,9 +856,9 @@ const styles = StyleSheet.create({
   acceptedTitle: { fontSize: FontSize.lg, fontWeight: FontWeight.black },
   acceptedSub:   { fontSize: FontSize.sm, textAlign: 'center', lineHeight: 20 },
 
-  declinedState: { gap: Spacing[3], padding: Spacing[4], borderRadius: Radius.sm, alignItems: 'center' },
+  declinedState: { gap: Spacing[3], padding: Spacing[4], borderRadius: Radius.xl, alignItems: 'center' },
   declinedText:  { fontSize: FontSize.sm, fontStyle: 'italic' },
 
-  closedBanner:  { padding: Spacing[4], borderRadius: Radius.sm, borderWidth: StyleSheet.hairlineWidth },
+  closedBanner:  { padding: Spacing[4], borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth },
   closedText:    { fontSize: FontSize.sm, textAlign: 'center', lineHeight: 20 },
 });

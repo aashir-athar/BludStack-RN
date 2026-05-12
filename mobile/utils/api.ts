@@ -112,6 +112,9 @@ export type ProfilePatch = Partial<{
   share_medical_history: boolean;
   is_available_to_donate: boolean;
   address: string | null;
+  phone: string | null;
+  whatsapp_available: boolean;
+  role: 'donor' | 'recipient' | 'both';
 }>;
 export const apiUpdateProfile = (patch: ProfilePatch) =>
   request<unknown>('PATCH', '/profiles/me', patch);
@@ -180,6 +183,9 @@ export const apiCompleteDonation = (requestId: string, donorId: string) =>
   );
 
 export const apiDonationHistory = () => request<any[]>('GET', '/donations/history');
+
+export const apiDonationHeartbeat = (requestId: string, latitude: number, longitude: number) =>
+  request<{ ok: true }>('POST', '/donations/heartbeat', { requestId, latitude, longitude });
 
 // ── Notifications ────────────────────────────────────────────────────────────
 export const apiRegisterPushToken = (token: string) =>

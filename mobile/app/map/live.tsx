@@ -11,8 +11,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
+import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/utils/supabase';
@@ -81,18 +83,37 @@ export default function LiveMapScreen() {
     }
   }, [requestId]);
 
-  // Load accepted donors' locations (for recipient view)
+  // Load accepted donors' live locations from request_responses.
+  // Source of truth = request_responses.donor_lat/donor_lon, pushed via
+  // /donations/heartbeat. Falls back to profile-level lat/lon only if the
+  // donor hasn't started heartbeating yet (rare).
   const loadDonors = useCallback(async () => {
     if (!requestId || role !== 'recipient') return;
     const { data } = await supabase
       .from('request_responses')
-      .select('donor_id, donor:profiles!donor_id(id, full_name, blood_group, latitude, longitude)')
+      .select(`
+        donor_id, donor_lat, donor_lon, donor_location_updated_at,
+        donor:profiles!donor_id ( id, full_name, blood_group )
+      `)
       .eq('request_id', requestId)
       .eq('status', 'accepted');
 
-    const donorData = (data ?? [])
-      .map((r: any) => r.donor)
-      .filter((d: any) => d?.latitude && d?.longitude);
+    const donorData: DonorLocation[] = (data ?? [])
+      .map((r: any) => {
+        const d = r.donor;
+        if (!d) return null;
+        const lat = r.donor_lat;
+        const lon = r.donor_lon;
+        if (lat == null || lon == null) return null;
+        return {
+          id:          d.id,
+          latitude:    lat,
+          longitude:   lon,
+          full_name:   d.full_name,
+          blood_group: d.blood_group,
+        };
+      })
+      .filter(Boolean) as DonorLocation[];
     setDonors(donorData);
   }, [requestId, role]);
 
@@ -101,10 +122,14 @@ export default function LiveMapScreen() {
     loadRequest();
     loadDonors();
 
-    // Real-time donor location updates
+    // Realtime: subscribe to UPDATEs on request_responses for this request.
+    // RLS allows the recipient to see donor responses on their own requests.
     const sub = supabase
-      .channel('live_locations')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, loadDonors)
+      .channel(`live_${requestId}`)
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public', table: 'request_responses',
+        filter: `request_id=eq.${requestId}`,
+      }, loadDonors)
       .subscribe();
 
     return () => {
@@ -123,9 +148,20 @@ export default function LiveMapScreen() {
 
   const openGoogleMaps = useCallback(() => {
     if (!requestLocation) return;
+    Haptics.selectionAsync().catch(() => {});
     const url = `https://www.google.com/maps/dir/?api=1&destination=${requestLocation.latitude},${requestLocation.longitude}&travelmode=driving`;
     Linking.openURL(url);
   }, [requestLocation]);
+
+  const closeMap = useCallback(() => {
+    Haptics.selectionAsync().catch(() => {});
+    router.back();
+  }, [router]);
+
+  const onFit = useCallback(() => {
+    Haptics.selectionAsync().catch(() => {});
+    fitToMarkers();
+  }, [fitToMarkers]);
 
   const distance = myLocation && requestLocation
     ? haversineDistance(myLocation.latitude, myLocation.longitude, requestLocation.latitude, requestLocation.longitude)
@@ -137,18 +173,21 @@ export default function LiveMapScreen() {
     <View style={[styles.root, { backgroundColor: theme.background }]}>
       {/* Top overlay */}
       <View style={[styles.topOverlay, { paddingTop: insets.top + Spacing[2] }]}>
-        <View style={[styles.topCard, { backgroundColor: theme.glass }]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.closeBtn} activeOpacity={0.8}>
-            <Text style={{ color: theme.accent, fontSize: 18 }}>✕</Text>
+        <View style={[styles.topCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <TouchableOpacity onPress={closeMap} style={styles.closeBtn} activeOpacity={0.8} accessibilityLabel="Close live map">
+            <Ionicons name="close" size={20} color={theme.textPrimary} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.liveLabel, { color: theme.primary }]}>● LIVE TRACKING</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.primary }} />
+              <Text style={[styles.liveLabel, { color: theme.primary }]}>LIVE TRACKING</Text>
+            </View>
             <Text style={[styles.hospitalText, { color: theme.textPrimary }]} numberOfLines={1}>
               {requestLocation?.hospital ?? 'Loading…'}
             </Text>
           </View>
-          <TouchableOpacity onPress={fitToMarkers} style={[styles.fitBtn, { backgroundColor: theme.muted, borderColor: theme.border }]}>
-            <Text style={{ fontSize: 16 }}>⊕</Text>
+          <TouchableOpacity onPress={onFit} style={[styles.fitBtn, { backgroundColor: theme.cardElevated, borderColor: theme.border }]} accessibilityLabel="Fit map to markers">
+            <Ionicons name="scan" size={18} color={theme.textPrimary} />
           </TouchableOpacity>
         </View>
       </View>
@@ -176,7 +215,7 @@ export default function LiveMapScreen() {
             description="Destination"
           >
             <View style={[styles.hospitalMarker, { backgroundColor: theme.primary }]}>
-              <Text style={styles.markerEmoji}>🏥</Text>
+              <Ionicons name="medical" size={18} color={theme.textOnPrimary} />
             </View>
           </Marker>
         )}
@@ -189,8 +228,8 @@ export default function LiveMapScreen() {
             title={donor.full_name}
             description={`${donor.blood_group} · Moving to hospital`}
           >
-            <View style={[styles.donorMarker, { backgroundColor: theme.accent }]}>
-              <Text style={styles.markerEmoji}>🩸</Text>
+            <View style={[styles.donorMarker, { backgroundColor: theme.primary }]}>
+              <Ionicons name="water" size={16} color={theme.textOnPrimary} />
             </View>
           </Marker>
         ))}
@@ -199,7 +238,7 @@ export default function LiveMapScreen() {
         {role === 'donor' && myLocation && requestLocation && (
           <Polyline
             coordinates={[myLocation, requestLocation]}
-            strokeColor={theme.accent}
+            strokeColor={theme.primary}
             strokeWidth={2.5}
             lineDashPattern={[6, 4]}
           />
@@ -218,7 +257,7 @@ export default function LiveMapScreen() {
           </View>
           <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
           <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: theme.accent }]}>
+            <Text style={[styles.statValue, { color: theme.primary }]}>
               {distance !== null ? `${estimateDriveMinutes(distance)} min` : '—'}
             </Text>
             <Text style={[styles.statLabel, { color: theme.textMuted }]}>Est. Drive</Text>
@@ -236,7 +275,7 @@ export default function LiveMapScreen() {
         {role === 'recipient' && donors.length > 0 && (
           <View style={[styles.donorsRow, { borderTopColor: theme.border }]}>
             <Text style={[styles.donorsLabel, { color: theme.textSecondary }]}>
-              🩸 {donors.length} donor{donors.length !== 1 ? 's' : ''} en route
+              {donors.length} donor{donors.length !== 1 ? 's' : ''} en route
             </Text>
           </View>
         )}
@@ -244,7 +283,8 @@ export default function LiveMapScreen() {
         {/* CTA */}
         {role === 'donor' && (
           <Button
-            label="🗺️ Open in Google Maps"
+            label="Open in Google Maps"
+            icon={<Ionicons name="navigate" size={16} color={theme.textOnPrimary ?? '#fff'} />}
             variant="primary"
             size="lg"
             onPress={openGoogleMaps}

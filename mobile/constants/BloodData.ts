@@ -53,9 +53,9 @@ export const URGENCY_LEVELS = ['critical', 'urgent', 'standard'] as const;
 export type UrgencyLevel = typeof URGENCY_LEVELS[number];
 
 export const URGENCY_CONFIG = {
-  critical: { label: 'Critical', color: '#FF2D55', icon: '🚨', minutes: 30 },
-  urgent:   { label: 'Urgent',   color: '#FFB300', icon: '⚠️', minutes: 120 },
-  standard: { label: 'Standard', color: '#00C853', icon: '🩸', minutes: 720 },
+  critical: { label: 'Critical', color: '#FF2D55', icon: 'flash',            minutes: 30  },
+  urgent:   { label: 'Urgent',   color: '#FFB300', icon: 'time',             minutes: 120 },
+  standard: { label: 'Standard', color: '#00C853', icon: 'calendar-outline', minutes: 720 },
 };
 
 export const GENDER_OPTIONS = ['Male', 'Female', 'Other', 'Prefer not to say'] as const;

@@ -24,10 +24,11 @@ import {
   KeyboardAvoidingView, Platform,
 } from 'react-native';
 import Skeleton from '@/components/Skeleton';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useChatMessages, type ChatMessage } from '@/hooks/useChatMessages';
@@ -44,6 +45,7 @@ export default function ChatScreen() {
   const { theme }    = useTheme();
   const { user }     = useAuth();
   const router       = useRouter();
+  const insets       = useSafeAreaInsets();
   const listRef      = useRef<FlashListRef<ChatMessage>>(null);
 
   const {
@@ -69,6 +71,7 @@ export default function ChatScreen() {
     if (!trimmed || sending) return;
     setSending(true);
     setText('');
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     try {
       await sendMessage(trimmed);
       // Auto-scroll regardless of current position when the user themselves sends.
@@ -179,9 +182,18 @@ export default function ChatScreen() {
 
   if (loading) return <LoadingScreen message="Loading messages…" />;
 
+  // KeyboardAvoidingView setup:
+  //   • SafeAreaView claims only the TOP edge — bottom edge is owned by the
+  //     KeyboardAvoidingView so it can fully push the composer above the
+  //     keyboard with no double-padding gap.
+  //   • iOS uses `padding` (smooth slide) with offset = 0 because there's no
+  //     translucent status bar to compensate for.
+  //   • Android uses `height` (KAV adjusts its own height); `padding` on
+  //     Android intermittently leaves a gap on devices with edge-to-edge
+  //     gesture areas. The bottom inset is added explicitly to the input bar
+  //     instead so the composer never touches the gesture indicator.
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
-
+    <SafeAreaView style={[styles.root, { backgroundColor: theme.background }]} edges={['top']}>
       {/* ── Header ───────────────────────────────────────────────────── */}
       <View style={[styles.header, { borderBottomColor: theme.border, backgroundColor: theme.surface }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7}>
@@ -213,7 +225,7 @@ export default function ChatScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
         {/* ── Messages list (FlashList v2) ───────────────────────────── */}
@@ -233,8 +245,19 @@ export default function ChatScreen() {
           getItemType={() => 'text'}
         />
 
-        {/* ── Input bar ──────────────────────────────────────────────── */}
-        <View style={[styles.inputBar, { backgroundColor: theme.surface, borderTopColor: theme.border }]}>
+        {/* ── Input bar — bottom inset baked into paddingBottom so the
+            composer never sits on the gesture indicator on Android, and so
+            the keyboard never hides it on either platform. */}
+        <View
+          style={[
+            styles.inputBar,
+            {
+              backgroundColor: theme.surface,
+              borderTopColor:  theme.border,
+              paddingBottom:   Math.max(insets.bottom, Spacing[3]),
+            },
+          ]}
+        >
           <View style={[styles.inputWrap, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder }]}>
             <TextInput
               value={text}
@@ -297,8 +320,8 @@ const styles = StyleSheet.create({
   headerName:    { fontSize: FontSize.sm, fontWeight: FontWeight.black },
   headerSub:     { fontSize: FontSize.xs, marginTop: 1 },
   viewReqBtn: {
-    paddingHorizontal: Spacing[2], paddingVertical: Spacing[1],
-    borderRadius: Radius.xs, borderWidth: 1,
+    paddingHorizontal: Spacing[3], paddingVertical: Spacing[1],
+    borderRadius: Radius.pill, borderWidth: StyleSheet.hairlineWidth,
   },
   viewReqLabel: { fontSize: FontSize.xs, fontWeight: FontWeight.medium },
 
