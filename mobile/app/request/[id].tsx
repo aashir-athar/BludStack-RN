@@ -264,10 +264,17 @@ export default function RequestDetailScreen() {
     );
   }, [id, user?.id, responses, fetchRequest]);
 
+  // Call ONLY uses the phone column. No email fallback — email is never an
+  // in-app contact channel; users coordinate via Phone, WhatsApp (when the
+  // other party has whatsapp_available toggled on), or in-app Chat.
   const callContact = useCallback((contact: any) => {
-    const phone = contact?.phone ?? contact?.email;
-    if (phone) Linking.openURL(`tel:${phone}`);
-  }, []);
+    if (!contact?.phone) {
+      toast.info('No phone shared', { description: 'Use chat to reach them — they haven\'t added a phone number.' });
+      return;
+    }
+    Haptics.selectionAsync().catch(() => {});
+    Linking.openURL(`tel:${contact.phone}`);
+  }, [toast]);
 
   // In-app chat scoped to this request — NEVER email. The mutual-commitment
   // RLS guarantees both parties can resolve each other's profile, so the
@@ -437,6 +444,7 @@ export default function RequestDetailScreen() {
               profile={request.recipient as any}
               onCall={() => callContact(request.recipient)}
               onMessage={() => messageContact(request.recipient)}
+              interactive={isActive}
             />
             <Button
               label="View full profile"
@@ -470,11 +478,14 @@ export default function RequestDetailScreen() {
                   profile={resp.donor as any}
                   onCall={() => callContact(resp.donor)}
                   onMessage={() => messageContact(resp.donor)}
+                  interactive={isActive}
                 />
 
                 {/* Per-donor heartbeat status pill (recipient view).
-                    Shows whether THIS specific donor is sharing live GPS. */}
-                {(resp as any).donor_lat != null ? (
+                    Only renders while the request is still active — once
+                    fulfilled / cancelled / expired the live channel closes
+                    along with chat + call + WhatsApp. */}
+                {isActive && ((resp as any).donor_lat != null ? (
                   <View style={[styles.liveWaitPill, { backgroundColor: theme.successSoft, borderColor: theme.success }]}>
                     <View style={[styles.liveWaitDot, { backgroundColor: theme.success }]} />
                     <Text style={[styles.liveWaitText, { color: theme.success }]} numberOfLines={1}>
@@ -488,7 +499,7 @@ export default function RequestDetailScreen() {
                       Waiting for {(resp.donor as any).full_name?.split(' ')[0] ?? 'donor'} to share GPS
                     </Text>
                   </View>
-                )}
+                ))}
 
                 {/* No duplicate Message button — the ProfileCard's Chat pill
                     already opens this thread via messageContact(). One chat
@@ -511,11 +522,12 @@ export default function RequestDetailScreen() {
               </View>
             ))}
 
-            {/* Live tracking — always render once a donor accepts (Uber-driver
-                UX). When a heartbeat exists, the button is primary; until then
+            {/* Live tracking — only while the request is active. Closes
+                with chat / call / WhatsApp once the request seals.
+                When a heartbeat exists, the button is primary; until then
                 we show a soft "waiting for GPS" pill so the recipient knows
                 tracking is wired and pending, not missing. */}
-            {(() => {
+            {isActive && (() => {
               const hasHeartbeat = acceptedResponses.some(r => (r as any).donor_lat != null);
               return hasHeartbeat ? (
                 <Button

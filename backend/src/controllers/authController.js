@@ -76,7 +76,10 @@ async function register(req, res, next) {
       if (age === null) {
         return error(res, 'date_of_birth is required to register as a donor', 400);
       }
-      if (age < 18) {
+      // Donor eligibility window: 18-65 (WHO + most national blood-bank
+      // guidelines). Outside this window, downgrade silently to recipient
+      // — the caller gets `downgraded: true` and can surface a toast.
+      if (age < 18 || age > 65) {
         role = 'recipient';
         downgraded = true;
       }
@@ -111,7 +114,7 @@ async function register(req, res, next) {
       res,
       { profile: data, downgraded },
       downgraded
-        ? 'Profile created. Donor role requires age 18+, account set up as recipient.'
+        ? 'Profile created. Donor role requires age 18–65; account set up as recipient.'
         : 'Profile created',
       201,
     );
