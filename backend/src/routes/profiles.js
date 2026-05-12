@@ -42,7 +42,11 @@ router.patch(
     body('share_medical_history').optional().isBoolean(),
     body('is_available_to_donate').optional().isBoolean(),
     body('push_token').optional().isString().isLength({ max: 200 }),
-    body('address').optional().isString().isLength({ max: 300 }),
+    // `optional({ nullable: true })` so an explicit `null` from the client
+    // (mobile sends `address.trim() || null` to clear the column) skips the
+    // .isString() check. Without this, "clear the address" returns
+    // "address: Invalid value" — surfaced on profile/edit save.
+    body('address').optional({ nullable: true }).isString().isLength({ max: 300 }),
   ],
   validate,
   updateMyProfile,
