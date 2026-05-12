@@ -1,77 +1,117 @@
 // components/SelectSheet.tsx
+// Bottom-sheet selector with backdrop + handle. Theme-tokenised, accepts a
+// `value` prop (new) OR `selected` (legacy) for the active option.
+
 import React, { useCallback } from 'react';
 import {
-  Modal, View, Text, TouchableOpacity, FlatList,
-  StyleSheet, TouchableWithoutFeedback,
+  Modal, View, Text, Pressable, FlatList, StyleSheet,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
-import { FontSize, FontWeight, Spacing, Radius, LetterSpacing } from '@/constants/Typography';
+import {
+  FontSize, FontWeight, Spacing, Radius, LetterSpacing, Elevation,
+} from '@/constants/Typography';
 
-interface Option<T = string> {
+export interface SelectSheetOption<T = string> {
   label: string;
   value: T;
-  icon?: string;
+  iconName?: keyof typeof Ionicons.glyphMap;
   description?: string;
+  /** Backwards-compat: legacy string icon (ignored visually). */
+  icon?: string;
 }
 
-interface SelectSheetProps<T = string> {
+export interface SelectSheetProps<T = string> {
   visible: boolean;
   title: string;
-  options: Option<T>[];
+  options: SelectSheetOption<T>[];
+  /** Preferred prop name. */
+  value?: T;
+  /** Backwards-compat. */
   selected?: T;
   onSelect: (value: T) => void;
   onClose: () => void;
 }
 
 function SelectSheet<T extends string>({
-  visible, title, options, selected, onSelect, onClose,
+  visible, title, options, value, selected, onSelect, onClose,
 }: SelectSheetProps<T>) {
   const { theme } = useTheme();
   const insets    = useSafeAreaInsets();
+  const active = value ?? selected;
 
-  const renderItem = useCallback(({ item }: { item: Option<T> }) => {
-    const isSelected = item.value === selected;
+  const renderItem = useCallback(({ item }: { item: SelectSheetOption<T> }) => {
+    const isSelected = item.value === active;
     return (
-      <TouchableOpacity
-        onPress={() => { onSelect(item.value); onClose(); }}
-        style={[styles.option, { borderBottomColor: theme.border }]}
-        activeOpacity={0.6}
+      <Pressable
+        onPress={() => { Haptics.selectionAsync().catch(() => {}); onSelect(item.value); onClose(); }}
+        style={({ pressed }) => [
+          styles.option,
+          { backgroundColor: pressed ? theme.cardHover : 'transparent' },
+        ]}
+        accessibilityRole="radio"
+        accessibilityState={{ selected: isSelected }}
       >
-        {item.icon && <Text style={styles.optIcon}>{item.icon}</Text>}
+        {item.iconName && (
+          <View style={[styles.iconWrap, { backgroundColor: theme.primarySoft }]}>
+            <Ionicons name={item.iconName} size={18} color={theme.primary} />
+          </View>
+        )}
         <View style={styles.optText}>
-          <Text style={[styles.optLabel, { color: isSelected ? theme.primary : theme.textPrimary }]}>
+          <Text style={[
+            styles.optLabel,
+            { color: isSelected ? theme.primary : theme.textPrimary },
+          ]}>
             {item.label}
           </Text>
           {item.description && (
             <Text style={[styles.optDesc, { color: theme.textMuted }]}>{item.description}</Text>
           )}
         </View>
-        {isSelected && (
-          <Text style={[styles.check, { color: theme.primary }]}>✓</Text>
-        )}
-      </TouchableOpacity>
+        <Ionicons
+          name={isSelected ? 'radio-button-on' : 'radio-button-off'}
+          size={22}
+          color={isSelected ? theme.primary : theme.textTertiary}
+        />
+      </Pressable>
     );
-  }, [selected, theme, onSelect, onClose]);
+  }, [active, theme, onSelect, onClose]);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={styles.backdrop} />
-      </TouchableWithoutFeedback>
-      <View style={[styles.sheet, {
-        backgroundColor: theme.surface,
-        paddingBottom: insets.bottom + Spacing[4],
-      }]}>
-        <View style={[styles.handle, { backgroundColor: theme.border }]} />
-        <Text style={[styles.sheetTitle, { color: theme.textPrimary, borderBottomColor: theme.border }]}>
-          {title}
-        </Text>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+      <Pressable style={[styles.backdrop, { backgroundColor: theme.scrim }]} onPress={onClose} />
+      <View
+        style={[
+          styles.sheet,
+          {
+            backgroundColor: theme.surface,
+            borderColor: theme.border,
+            paddingBottom: insets.bottom + Spacing[3],
+          },
+          Elevation.lg,
+        ]}
+      >
+        {/* Brand accent strip + handle — matches Request screen sheet language. */}
+        <View style={styles.sheetTop}>
+          <View style={[styles.accentStrip, { backgroundColor: theme.primary }]} />
+          <View style={[styles.handle, { backgroundColor: theme.borderStrong }]} />
+        </View>
+        <View style={styles.sheetHeader}>
+          <Text style={[styles.sheetTitle, { color: theme.textPrimary }]}>{title}</Text>
+          <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
+            <Ionicons name="close" size={22} color={theme.textMuted} />
+          </Pressable>
+        </View>
+        <View style={[styles.divider, { backgroundColor: theme.divider }]} />
         <FlatList
           data={options}
           keyExtractor={(item) => String(item.value)}
           renderItem={renderItem}
           showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingVertical: Spacing[2] }}
+          ItemSeparatorComponent={() => <View style={{ height: 2 }} />}
         />
       </View>
     </Modal>
@@ -79,30 +119,38 @@ function SelectSheet<T extends string>({
 }
 
 const styles = StyleSheet.create({
-  backdrop:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
+  backdrop: { ...StyleSheet.absoluteFillObject },
   sheet: {
+    position: 'absolute', left: 0, right: 0, bottom: 0,
     borderTopLeftRadius: Radius['2xl'],
     borderTopRightRadius: Radius['2xl'],
-    maxHeight: '75%',
+    maxHeight: '78%',
     paddingTop: Spacing[2],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
   },
-  handle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: Spacing[3] },
-  sheetTitle: {
-    fontSize: FontSize.base, fontWeight: FontWeight.black,
-    letterSpacing: LetterSpacing.snug,
-    paddingHorizontal: Spacing[6], paddingBottom: Spacing[4],
-    borderBottomWidth: StyleSheet.hairlineWidth,
+  sheetTop:    { alignItems: 'center', paddingTop: Spacing[2], paddingBottom: Spacing[2] },
+  accentStrip: { width: 36, height: 3, borderRadius: 2, marginBottom: Spacing[1], opacity: 0.9 },
+  handle:      { width: 44, height: 4, borderRadius: 2 },
+  sheetHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: Spacing[5], paddingVertical: Spacing[3],
   },
+  sheetTitle: { fontSize: FontSize.lg, fontWeight: FontWeight.black, letterSpacing: LetterSpacing.tight },
+  divider:    { height: StyleSheet.hairlineWidth, marginHorizontal: Spacing[5] },
   option: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: Spacing[6], paddingVertical: Spacing[4],
-    borderBottomWidth: StyleSheet.hairlineWidth, gap: Spacing[3],
+    paddingHorizontal: Spacing[5], paddingVertical: Spacing[4],
+    gap: Spacing[3],
   },
-  optIcon:  { fontSize: 20 },
+  iconWrap: {
+    width: 36, height: 36, borderRadius: Radius.pill,
+    alignItems: 'center', justifyContent: 'center',
+  },
   optText:  { flex: 1 },
-  optLabel: { fontSize: FontSize.base, fontWeight: FontWeight.medium },
-  optDesc:  { fontSize: FontSize.xs, marginTop: 2 },
-  check:    { fontSize: FontSize.md, fontWeight: FontWeight.black },
+  optLabel: { fontSize: FontSize.base, fontWeight: FontWeight.bold, letterSpacing: LetterSpacing.snug },
+  optDesc:  { fontSize: FontSize.xs, marginTop: 2, lineHeight: FontSize.xs * 1.5 },
 });
 
 export default SelectSheet;

@@ -49,7 +49,8 @@ async function updateMyProfile(req, res, next) {
     const ALLOWED_FIELDS = [
       'full_name', 'gender', 'date_of_birth', 'avatar_url',
       'blood_group', 'medical_conditions', 'share_medical_history',
-      'is_available_to_donate', 'push_token', 'address',
+      'is_available_to_donate', 'address',
+      'phone', 'whatsapp_available',
     ];
 
     const updates = {};
@@ -59,6 +60,36 @@ async function updateMyProfile(req, res, next) {
 
     if (Object.keys(updates).length === 0) {
       return error(res, 'No valid fields provided', 400);
+    }
+
+    // Role change is allowed but re-validates the donor age gate.
+    if (req.body.role !== undefined) {
+      const VALID = new Set(['donor', 'recipient', 'both']);
+      if (!VALID.has(req.body.role)) {
+        return error(res, 'Invalid role', 400);
+      }
+      if (req.body.role === 'donor' || req.body.role === 'both') {
+        const dob = req.body.date_of_birth !== undefined ? req.body.date_of_birth : null;
+        // Pull current DOB if not in payload, so existing donors don't get dropped
+        let dobIso = dob;
+        if (!dobIso) {
+          const { data: cur } = await supabaseAdmin
+            .from('profiles').select('date_of_birth').eq('id', req.userId).single();
+          dobIso = cur?.date_of_birth ?? null;
+        }
+        if (!dobIso) {
+          return error(res, 'Donor role requires date_of_birth on the profile', 400);
+        }
+        const ageMs = Date.now() - new Date(dobIso).getTime();
+        const ageYears = ageMs / (365.25 * 86_400_000);
+        if (ageYears < 18) {
+          return error(res, 'Donor role requires age 18+', 400);
+        }
+      }
+      updates.role = req.body.role;
+      if (req.body.role === 'recipient') {
+        updates.is_available_to_donate = false;
+      }
     }
 
     const { data, error: dbErr } = await supabaseAdmin

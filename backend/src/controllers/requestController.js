@@ -74,6 +74,9 @@ async function listRequests(req, res, next) {
         )
       `, { count: 'exact' })
       .eq('status', 'active')
+      // Exclude the caller's own posted requests — they aren't a donor for
+      // themselves. Belt-and-suspenders with mobile-side filtering.
+      .neq('recipient_id', req.userId)
       .order('created_at', { ascending: false })
       .range((page - 1) * limit, page * limit - 1);
 

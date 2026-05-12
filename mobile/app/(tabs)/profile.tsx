@@ -7,20 +7,23 @@ import {
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, router } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/contexts/ToastContext';
 import BloodGroupBadge from '@/components/BloodGroupBadge';
 import ToggleSwitch from '@/components/ToggleSwitch';
 import SelectSheet from '@/components/SelectSheet';
 import Button from '@/components/Button';
-import { FontSize, FontWeight, Spacing, Radius, LetterSpacing } from '@/constants/Typography';
+import { FontSize, FontWeight, Spacing, Radius, LetterSpacing, TAB_BAR_BOTTOM_INSET } from '@/constants/Typography';
 import { BLOOD_GROUPS } from '@/constants/BloodData';
 import { formatDate, canDonateAgain } from '@/utils/helpers';
 
 export default function ProfileScreen() {
   const { theme, mode, setMode } = useTheme();
   const { profile, signOut, updateProfile } = useAuth();
+  const toast  = useToast();
   const insets = useSafeAreaInsets();
   const [saving, setSaving] = useState(false);
   const [themeSheet, setThemeSheet]  = useState(false);
@@ -29,16 +32,20 @@ export default function ProfileScreen() {
   const { canDonate, daysLeft } = canDonateAgain(profile?.last_donation_date ?? null);
 
   const toggle = useCallback(async (key: string, val: boolean) => {
+    Haptics.selectionAsync().catch(() => {});
     setSaving(true);
     try { await updateProfile({ [key]: val } as any); }
-    catch (e: any) { Alert.alert('Error', e.message); }
+    catch (e: any) {
+      toast.error("Couldn't update", { description: e?.message ?? 'Try again in a moment' });
+    }
     finally { setSaving(false); }
-  }, [updateProfile]);
+  }, [updateProfile, toast]);
 
   const handleSignOut = useCallback(() => {
-    Alert.alert('Sign Out', 'Are you sure?', [
+    Haptics.selectionAsync().catch(() => {});
+    Alert.alert('Sign out', 'Sign out of BludStack? You can sign back in any time with your email.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign Out', style: 'destructive', onPress: signOut },
+      { text: 'Sign out', style: 'destructive', onPress: signOut },
     ]);
   }, [signOut]);
 
@@ -58,11 +65,14 @@ export default function ProfileScreen() {
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
       <ScrollView
-        contentContainerStyle={{ paddingBottom: insets.bottom + Spacing[12] }}
+        contentContainerStyle={{ paddingBottom: TAB_BAR_BOTTOM_INSET + Spacing[4] }}
         showsVerticalScrollIndicator={false}
       >
         {/* ── Hero ── */}
         <View style={[styles.hero, { paddingTop: insets.top + Spacing[6], backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
+          <Text style={[styles.sectionLabel, { color: theme.textMuted, marginBottom: Spacing[3] }]}>
+            Account · Profile
+          </Text>
           {/* Avatar */}
           <View style={[styles.avatarRing, { borderColor: statusColor }]}>
             {profile.avatar_url ? (
@@ -85,7 +95,10 @@ export default function ProfileScreen() {
             <View style={[styles.dot, { backgroundColor: statusColor }]} />
             <Text style={[styles.statusLabel, { color: statusColor }]}>{statusLabel}</Text>
             {profile.is_verified && (
-              <Text style={[styles.verified, { color: theme.success }]}>  ✓ Verified</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: Spacing[2] }}>
+                <Ionicons name="checkmark-circle" size={14} color={theme.success} />
+                <Text style={[styles.verified, { color: theme.success }]}>Verified</Text>
+              </View>
             )}
           </View>
 
@@ -93,7 +106,7 @@ export default function ProfileScreen() {
           <View style={[styles.statsRow, { borderTopColor: theme.border }]}>
             <Stat label="DONATIONS"   value={profile.total_donations} color={theme.primary} theme={theme} />
             <View style={[styles.statSep, { backgroundColor: theme.border }]} />
-            <Stat label="LIVES HELPED" value={profile.total_donations * 3} color={theme.success} theme={theme} />
+            <Stat label="LIVES HELPED" value={profile.total_donations} color={theme.success} theme={theme} />
             <View style={[styles.statSep, { backgroundColor: theme.border }]} />
             <Stat label="LAST DONATED"
               value={profile.last_donation_date ? formatDate(profile.last_donation_date) : '—'}
@@ -116,17 +129,23 @@ export default function ProfileScreen() {
           <Text style={[styles.caret, { color: theme.textMuted }]}>›</Text>
         </TouchableOpacity>
 
-        {/* ── Donor settings ── */}
+        {/* ── Donor settings ──
+            Inner toggles render in 'inline' variant so they flush into the
+            parent card — nested rounded rectangles would compete for the eye.
+            A hairline divider separates the two rows. */}
         <SectionHeader label="DONOR SETTINGS" theme={theme} />
         <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <ToggleSwitch
+            variant="inline"
             label="Available to Donate"
             description="Receive alerts when someone nearby needs your blood group"
             value={profile.is_available_to_donate}
             onValueChange={v => toggle('is_available_to_donate', v)}
             disabled={saving || !canDonate}
           />
+          <View style={[styles.cardDivider, { backgroundColor: theme.divider }]} />
           <ToggleSwitch
+            variant="inline"
             label="Share Medical History"
             description="Let matched donors/recipients see your disclosed conditions"
             value={profile.share_medical_history}
@@ -154,6 +173,25 @@ export default function ProfileScreen() {
           </>
         )}
 
+        {/* ── Edit profile ── */}
+        <SectionHeader label="PROFILE" theme={theme} />
+        <TouchableOpacity
+          onPress={() => router.push('/profile/edit' as any)}
+          style={[styles.settingRow, { backgroundColor: theme.card, borderColor: theme.border }]}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Edit profile"
+        >
+          <Ionicons name="person-circle-outline" size={20} color={theme.textPrimary} />
+          <View style={{ flex: 1, marginLeft: Spacing[3] }}>
+            <Text style={[styles.rowTitle, { color: theme.textPrimary }]}>Edit profile</Text>
+            <Text style={[styles.rowSub, { color: theme.textMuted }]}>
+              Name, blood, role, contact, medical
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+        </TouchableOpacity>
+
         {/* ── App settings ── */}
         <SectionHeader label="APP SETTINGS" theme={theme} />
         <TouchableOpacity
@@ -179,13 +217,13 @@ export default function ProfileScreen() {
         <SectionHeader label="ABOUT" theme={theme} />
         <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
           {[
-            { icon: 'ℹ️', label: 'Version', value: '1.0.0' },
-            { icon: '❤️', label: 'License', value: 'Free & Open Source' },
-            { icon: '🛡️', label: 'Security', value: 'Supabase RLS' },
-          ].map(({ icon, label, value }) => (
+            { iconName: 'information-circle-outline', label: 'Version',  value: '1.0.0' },
+            { iconName: 'heart-outline',              label: 'License',  value: 'Free and open source' },
+            { iconName: 'shield-checkmark-outline',   label: 'Security', value: 'Supabase RLS' },
+          ].map(({ iconName, label, value }) => (
             <View key={label} style={[styles.aboutRow, { borderBottomColor: theme.border }]}>
-              <Text style={styles.aboutIcon}>{icon}</Text>
-              <Text style={[styles.aboutLabel, { color: theme.textPrimary }]}>{label}</Text>
+              <Ionicons name={iconName as any} size={18} color={theme.textMuted} />
+              <Text style={[styles.aboutLabel, { color: theme.textPrimary, marginLeft: Spacing[3] }]}>{label}</Text>
               <Text style={[styles.aboutValue, { color: theme.textMuted }]}>{value}</Text>
             </View>
           ))}
@@ -249,6 +287,12 @@ const styles = StyleSheet.create({
   avatarFallback: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center' },
   initial:     { fontSize: FontSize['2xl'], fontWeight: FontWeight.black },
   heroName:    { fontSize: FontSize.xl, fontWeight: FontWeight.black, letterSpacing: LetterSpacing.snug },
+  sectionLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.black,
+    letterSpacing: LetterSpacing.widest,
+    textTransform: 'uppercase',
+  },
   heroEmail:   { fontSize: FontSize.sm, marginTop: -Spacing[2] },
   statusRow:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing[4], paddingVertical: Spacing[2], borderRadius: Radius.full, gap: Spacing[2] },
   dot:         { width: 7, height: 7, borderRadius: 4 },
@@ -257,14 +301,15 @@ const styles = StyleSheet.create({
   statsRow:    { flexDirection: 'row', alignItems: 'center', width: '100%', borderTopWidth: StyleSheet.hairlineWidth, paddingTop: Spacing[5], paddingHorizontal: Spacing[4] },
   statSep:     { width: StyleSheet.hairlineWidth, height: 32 },
   sectionHeader: { fontSize: FontSize['2xs'], fontWeight: FontWeight.black, letterSpacing: LetterSpacing.widest, textTransform: 'uppercase', paddingHorizontal: Spacing[5], paddingTop: Spacing[6], paddingBottom: Spacing[2] },
-  settingRow:  { flexDirection: 'row', alignItems: 'center', padding: Spacing[4], marginHorizontal: Spacing[5], borderRadius: Radius.sm, borderWidth: StyleSheet.hairlineWidth },
-  card:        { marginHorizontal: Spacing[5], borderRadius: Radius.sm, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: Spacing[4] },
+  settingRow:  { flexDirection: 'row', alignItems: 'center', padding: Spacing[4], marginHorizontal: Spacing[5], borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth },
+  card:        { marginHorizontal: Spacing[5], borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: Spacing[4] },
+  cardDivider: { height: StyleSheet.hairlineWidth, marginHorizontal: -Spacing[4] },
   rowTitle:    { fontSize: FontSize.base, fontWeight: FontWeight.medium },
   rowSub:      { fontSize: FontSize.xs, marginTop: 2 },
   caret:       { fontSize: FontSize.lg },
   medNote:     { fontSize: FontSize.xs, paddingVertical: Spacing[3] },
   tags:        { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing[2], paddingBottom: Spacing[3] },
-  tag:         { paddingHorizontal: Spacing[2], paddingVertical: 3, borderRadius: Radius.xs },
+  tag:         { paddingHorizontal: Spacing[2], paddingVertical: 3, borderRadius: Radius.pill },
   tagText:     { fontSize: FontSize.xs },
   aboutRow:    { flexDirection: 'row', alignItems: 'center', paddingVertical: Spacing[4], borderBottomWidth: StyleSheet.hairlineWidth, gap: Spacing[3] },
   aboutIcon:   { fontSize: 18 },
