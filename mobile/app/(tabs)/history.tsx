@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth, canDonateByAge } from '@/contexts/AuthContext';
 import { supabase } from '@/utils/supabase';
@@ -151,7 +152,11 @@ export default function HistoryScreen() {
                 backgroundColor: canDonate && ageOk ? `${theme.success}10` : `${theme.warning}10`,
                 borderColor: canDonate && ageOk ? `${theme.success}25` : `${theme.warning}25`,
             }]}>
-                <Text style={{ fontSize: 20 }}>{canDonate && ageOk ? '✅' : '⏳'}</Text>
+                <Ionicons
+                  name={canDonate && ageOk ? 'checkmark-circle' : 'time-outline'}
+                  size={22}
+                  color={canDonate && ageOk ? theme.success : theme.warning}
+                />
                 <View style={{ flex: 1 }}>
                     <Text style={[styles.eligTitle, { color: canDonate && ageOk ? theme.success : theme.warning }]}>
                         {!ageOk

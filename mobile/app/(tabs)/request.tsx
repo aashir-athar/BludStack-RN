@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from '@/hooks/useLocation';
@@ -166,7 +167,7 @@ export default function RequestScreen() {
             value={hospital}
             onChangeText={setHospital}
             returnKeyType="next"
-            leftIcon={<Text>🏥</Text>}
+            leftIcon={<Ionicons name="medical-outline" size={18} color="#9C9890" />}
             containerStyle={{ marginBottom: Spacing[3] }}
           />
           <Input
