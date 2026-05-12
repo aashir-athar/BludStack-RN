@@ -21,8 +21,26 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform,
+  Platform,
 } from 'react-native';
+// IMPORTANT: react-native's KeyboardAvoidingView does NOT work in edge-to-edge
+// mode on Android (which Expo SDK 54 enables by default — see app.json's
+// edgeToEdgeEnabled: true). In edge-to-edge, Android does not resize the
+// window for the keyboard, so RN's KAV has nothing to push.
+// react-native-keyboard-controller's KAV reads the keyboard frame natively
+// and animates the wrapper above it — the only primitive that handles
+// edge-to-edge correctly. The KeyboardProvider is mounted in app/_layout.tsx.
+// On native it's lazy-required so Expo Go (which lacks the native module)
+// still loads — it falls back to RN's KAV there, which is fine since Expo Go
+// doesn't run edge-to-edge.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const KeyboardAvoidingView: React.ComponentType<any> = (() => {
+  try {
+    return require('react-native-keyboard-controller').KeyboardAvoidingView;
+  } catch {
+    return require('react-native').KeyboardAvoidingView;
+  }
+})();
 import Skeleton from '@/components/Skeleton';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -34,6 +52,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useChatMessages, type ChatMessage } from '@/hooks/useChatMessages';
 import { useChatTyping } from '@/hooks/useChatTyping';
 import LoadingScreen from '@/components/LoadingScreen';
+import { supabase } from '@/utils/supabase';
 import { FontSize, FontWeight, Spacing, Radius, LetterSpacing } from '@/constants/Typography';
 
 export default function ChatScreen() {
@@ -58,6 +77,56 @@ export default function ChatScreen() {
   const [text, setText] = React.useState('');
   const [sending, setSending] = React.useState(false);
 
+  // Request status drives the "chat closed" banner + composer disable.
+  // Subscribed to realtime so the chat seals the moment the request flips
+  // to fulfilled / cancelled / expired — the user doesn't have to navigate
+  // away and back.
+  const [reqStatus, setReqStatus] =
+    React.useState<'active' | 'fulfilled' | 'cancelled' | 'expired' | null>(null);
+
+  useEffect(() => {
+    if (!requestId) return;
+    let cancelled = false;
+
+    const fetchStatus = async () => {
+      const { data, error } = await supabase
+        .from('blood_requests')
+        .select('status')
+        .eq('id', requestId)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error) { console.warn('[chat fetchStatus]', error.message); return; }
+      if (data?.status) setReqStatus(data.status as any);
+    };
+    fetchStatus();
+
+    const ch = supabase
+      .channel(`chat_req_status_${requestId}_${Date.now()}`)
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public',
+        table: 'blood_requests',
+        filter: `id=eq.${requestId}`,
+      }, (payload: any) => {
+        const next = payload?.new?.status;
+        if (next) setReqStatus(next);
+      })
+      .subscribe();
+
+    return () => { cancelled = true; supabase.removeChannel(ch); };
+  }, [requestId]);
+
+  const chatClosed   = reqStatus !== null && reqStatus !== 'active';
+  const closedLabel  =
+    reqStatus === 'fulfilled' ? 'This request was fulfilled — chat is closed.'
+    : reqStatus === 'cancelled' ? 'This request was cancelled — chat is closed.'
+    : reqStatus === 'expired'   ? 'This request expired — chat is closed.'
+    : '';
+  const closedIcon: keyof typeof Ionicons.glyphMap =
+    reqStatus === 'fulfilled' ? 'heart'
+    : reqStatus === 'cancelled' ? 'close-circle'
+    : 'time-outline';
+  const closedTone = reqStatus === 'fulfilled' ? theme.success : theme.textMuted;
+
   // Mark incoming as read on entry + whenever new messages arrive while open
   useEffect(() => { markRead(); }, [markRead, messages.length]);
 
@@ -68,7 +137,7 @@ export default function ChatScreen() {
 
   const onSend = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed || sending) return;
+    if (!trimmed || sending || chatClosed) return;
     setSending(true);
     setText('');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -182,16 +251,17 @@ export default function ChatScreen() {
 
   if (loading) return <LoadingScreen message="Loading messages…" />;
 
-  // KeyboardAvoidingView setup:
+  // KeyboardAvoidingView (from react-native-keyboard-controller) setup:
   //   • SafeAreaView claims only the TOP edge — bottom edge is owned by the
-  //     KeyboardAvoidingView so it can fully push the composer above the
-  //     keyboard with no double-padding gap.
-  //   • iOS uses `padding` (smooth slide) with offset = 0 because there's no
-  //     translucent status bar to compensate for.
-  //   • Android uses `height` (KAV adjusts its own height); `padding` on
-  //     Android intermittently leaves a gap on devices with edge-to-edge
-  //     gesture areas. The bottom inset is added explicitly to the input bar
-  //     instead so the composer never touches the gesture indicator.
+  //     KAV so it can push the composer above the keyboard cleanly.
+  //   • `behavior="padding"` works on BOTH iOS and Android with this library
+  //     (RN's built-in KAV cannot do this in edge-to-edge mode — see the
+  //     import comment above).
+  //   • `keyboardVerticalOffset` = 0: no extra offset because the header is
+  //     outside the KAV. The composer hugs the top of the keyboard exactly.
+  //   • The bottom inset is added to the input bar's paddingBottom for the
+  //     "no keyboard" state so the composer sits above the Android gesture
+  //     indicator. When the keyboard is up, the inset shrinks to 0 naturally.
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: theme.background }]} edges={['top']}>
       {/* ── Header ───────────────────────────────────────────────────── */}
@@ -215,7 +285,7 @@ export default function ChatScreen() {
           </View>
         </View>
         <TouchableOpacity
-          onPress={() => router.push(`/request/${requestId}` as any)}
+          onPress={() => router.push({ pathname: '/request/[id]', params: { id: String(requestId) } })}
           style={[styles.viewReqBtn, { borderColor: theme.border }]}
           activeOpacity={0.7}
         >
@@ -225,7 +295,7 @@ export default function ChatScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS == 'ios' ? "padding" : "height"}
         keyboardVerticalOffset={0}
       >
         {/* ── Messages list (FlashList v2) ───────────────────────────── */}
@@ -245,9 +315,40 @@ export default function ChatScreen() {
           getItemType={() => 'text'}
         />
 
-        {/* ── Input bar — bottom inset baked into paddingBottom so the
-            composer never sits on the gesture indicator on Android, and so
-            the keyboard never hides it on either platform. */}
+        {/* ── Composer (or closed-state banner when the request is sealed) ──
+            When the parent request flips to fulfilled / cancelled / expired,
+            we swap the input row for a banner that explains why chat is
+            closed. Past messages stay visible above so the conversation
+            is read-only, not deleted. */}
+        {chatClosed ? (
+          <View
+            style={[
+              styles.closedBar,
+              {
+                backgroundColor: theme.surface,
+                borderTopColor:  theme.border,
+                paddingBottom:   Math.max(insets.bottom, Spacing[3]),
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.closedBarInner,
+                {
+                  backgroundColor: reqStatus === 'fulfilled' ? theme.successSoft : theme.cardElevated,
+                  borderColor:     reqStatus === 'fulfilled' ? theme.success     : theme.border,
+                },
+              ]}
+            >
+              <View style={[styles.closedBarIcon, { backgroundColor: closedTone + '1F', borderColor: closedTone }]}>
+                <Ionicons name={closedIcon} size={16} color={closedTone} />
+              </View>
+              <Text style={[styles.closedBarText, { color: closedTone }]} numberOfLines={2}>
+                {closedLabel}
+              </Text>
+            </View>
+          </View>
+        ) : (
         <View
           style={[
             styles.inputBar,
@@ -286,6 +387,7 @@ export default function ChatScreen() {
             />
           </TouchableOpacity>
         </View>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -355,6 +457,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'flex-end', gap: Spacing[2],
     paddingHorizontal: Spacing[4], paddingVertical: Spacing[3],
     borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  // ── Closed-state banner (replaces composer when request is sealed) ──
+  closedBar: {
+    paddingHorizontal: Spacing[4], paddingTop: Spacing[3],
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  closedBarInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[3],
+    paddingHorizontal: Spacing[3], paddingVertical: Spacing[3],
+    borderRadius: Radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  closedBarIcon: {
+    width: 32, height: 32, borderRadius: Radius.pill,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  closedBarText: {
+    flex: 1,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.bold,
+    letterSpacing: LetterSpacing.snug,
+    lineHeight: FontSize.sm * 1.4,
   },
   inputWrap: {
     flex: 1, minHeight: 40, maxHeight: 120,

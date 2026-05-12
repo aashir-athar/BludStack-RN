@@ -222,27 +222,39 @@ async function heartbeat(req, res, next) {
       return error(res, 'Coordinates out of valid range', 400);
     }
 
-    const { data: existing, error: lookupErr } = await supabaseAdmin
-      .from('request_responses')
-      .select('id, status')
-      .eq('request_id', requestId)
-      .eq('donor_id',   req.userId)
-      .maybeSingle();
-    if (lookupErr) throw lookupErr;
-    if (!existing) return error(res, "You haven't responded to this request", 404);
-    if (existing.status !== 'accepted') {
-      return error(res, `Heartbeat only for accepted donations (status: ${existing.status})`, 400);
-    }
-
-    const { error: updErr } = await supabaseAdmin
+    // Single conditional UPDATE — race-free. Previously the controller did a
+    // SELECT to check status, then a separate UPDATE keyed only on id, leaving
+    // a TOCTOU window where the response could flip to 'completed' or
+    // 'declined' between the two queries and the heartbeat would still write
+    // location to an inactive donation. Gating the UPDATE on status='accepted'
+    // in the same statement collapses the window to zero.
+    const { data: updated, error: updErr } = await supabaseAdmin
       .from('request_responses')
       .update({
         donor_lat: latitude,
         donor_lon: longitude,
         donor_location_updated_at: new Date().toISOString(),
       })
-      .eq('id', existing.id);
+      .eq('request_id', requestId)
+      .eq('donor_id',   req.userId)
+      .eq('status',     'accepted')
+      .select('id')
+      .maybeSingle();
+
     if (updErr) throw updErr;
+    if (!updated) {
+      // Distinguish "no response at all" from "response exists but not
+      // accepted" so the client UI can stop the heartbeat cleanly via the
+      // existing 400/404 fast-path in useDonorHeartbeat.
+      const { data: probe } = await supabaseAdmin
+        .from('request_responses')
+        .select('status')
+        .eq('request_id', requestId)
+        .eq('donor_id',   req.userId)
+        .maybeSingle();
+      if (!probe) return error(res, "You haven't responded to this request", 404);
+      return error(res, `Heartbeat only for accepted donations (status: ${probe.status})`, 409);
+    }
 
     return success(res, { ok: true });
   } catch (err) {

@@ -83,10 +83,10 @@ function routeFromPayload(router: ReturnType<typeof useRouter>, data: unknown) {
           receiverId: payload.receiverId,
           receiverName: typeof payload.receiverName === 'string' ? payload.receiverName : '',
         },
-      } as any);
+      });
       return;
     }
-    router.push(`/request/${requestId}` as any);
+    router.push({ pathname: '/request/[id]', params: { id: requestId } });
   }
 }
 

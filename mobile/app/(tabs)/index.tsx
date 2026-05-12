@@ -151,28 +151,28 @@ export default function HomeScreen() {
 
   const onRequestPress = useCallback((r: BloodRequest) => {
     Haptics.selectionAsync().catch(() => {});
-    router.push(`/request/${r.id}` as any);
+    router.push({ pathname: '/request/[id]', params: { id: r.id } });
   }, [router]);
 
   const onSeeAll = useCallback(() => {
     Haptics.selectionAsync().catch(() => {});
-    router.push('/(tabs)/donors' as any);
+    router.push('/(tabs)/donors');
   }, [router]);
 
   const goRequestTab = useCallback(() => {
     Haptics.selectionAsync().catch(() => {});
-    router.push('/(tabs)/request' as any);
+    router.push('/(tabs)/request');
   }, [router]);
 
   const goProfileTab = useCallback(() => {
     Haptics.selectionAsync().catch(() => {});
-    router.push('/(tabs)/profile' as any);
+    router.push('/(tabs)/profile');
   }, [router]);
 
   const openCommitment = useCallback(() => {
     if (!activeCommitment) return;
     Haptics.selectionAsync().catch(() => {});
-    router.push(`/request/${activeCommitment.requestId}` as any);
+    router.push({ pathname: '/request/[id]', params: { id: activeCommitment.requestId } });
   }, [router, activeCommitment]);
 
   const renderItem = useCallback(({ item }: { item: Section }) => {

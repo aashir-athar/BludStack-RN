@@ -176,7 +176,7 @@ export default function ProfileScreen() {
         {/* ── Edit profile ── */}
         <SectionHeader label="PROFILE" theme={theme} />
         <TouchableOpacity
-          onPress={() => router.push('/profile/edit' as any)}
+          onPress={() => router.push('/profile/edit')}
           style={[styles.settingRow, { backgroundColor: theme.card, borderColor: theme.border }]}
           activeOpacity={0.7}
           accessibilityRole="button"
