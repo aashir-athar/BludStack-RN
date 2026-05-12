@@ -86,12 +86,12 @@ export default function HistoryScreen() {
 
   const onRowPress = useCallback((id: string) => {
     Haptics.selectionAsync().catch(() => {});
-    router.push(`/request/${id}` as any);
+    router.push({ pathname: '/request/[id]', params: { id } });
   }, [router]);
 
   const goFindRequests = useCallback(() => {
     Haptics.selectionAsync().catch(() => {});
-    router.push('/(tabs)/donors' as any);
+    router.push('/(tabs)/donors');
   }, [router]);
 
   const renderItem = useCallback(({ item }: { item: DonationRecord }) => {

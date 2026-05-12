@@ -47,21 +47,30 @@ export function useDonorHeartbeat(requestId: string | undefined, enabled: boolea
     if (!enabled || !requestId) return;
     fatalErrorRef.current = false;
 
+    // Race-guard: when the deps flip mid-setup, the async IIFE might still be
+    // awaiting (permission prompt or watchPositionAsync). Without this flag,
+    // the watcher gets assigned to subRef AFTER the cleanup ran — leaking a
+    // background GPS subscription. We check the flag before every async
+    // continuation and inside the watcher callback.
+    let cancelled = false;
+
     (async () => {
       const { status } = await Location.getForegroundPermissionsAsync();
+      if (cancelled) return;
       if (status !== 'granted') {
         const req = await Location.requestForegroundPermissionsAsync();
+        if (cancelled) return;
         if (req.status !== 'granted') return;
       }
 
-      subRef.current = await Location.watchPositionAsync(
+      const sub = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
           timeInterval: LOCATION_TIME_INTERVAL,
           distanceInterval: LOCATION_DISTANCE_DELTA,
         },
         async (pos) => {
-          if (fatalErrorRef.current) return;
+          if (cancelled || fatalErrorRef.current) return;
           const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
           const now = Date.now();
           const last = lastCoordsRef.current;
@@ -71,12 +80,15 @@ export function useDonorHeartbeat(requestId: string | undefined, enabled: boolea
 
           try {
             await apiDonationHeartbeat(requestId, coords.latitude, coords.longitude);
+            if (cancelled) return;
             lastPushAtRef.current = now;
             lastCoordsRef.current = coords;
           } catch (e: any) {
-            // 400/404 means the donor no longer accepts this request — stop.
+            // 400/404 = donor no longer accepted, 409 = response status is
+            // no longer 'accepted' (TOCTOU-safe heartbeat). All three mean
+            // "stop pushing — we're done here".
             const status = e?.status as number | undefined;
-            if (status === 400 || status === 404) {
+            if (status === 400 || status === 404 || status === 409) {
               fatalErrorRef.current = true;
               subRef.current?.remove();
               subRef.current = null;
@@ -86,9 +98,19 @@ export function useDonorHeartbeat(requestId: string | undefined, enabled: boolea
           }
         },
       );
+
+      // If the effect was cancelled while watchPositionAsync was awaiting,
+      // we must tear down the freshly-created watcher immediately — never
+      // store it in subRef.
+      if (cancelled) {
+        sub.remove();
+        return;
+      }
+      subRef.current = sub;
     })();
 
     return () => {
+      cancelled = true;
       subRef.current?.remove();
       subRef.current = null;
       lastPushAtRef.current = 0;

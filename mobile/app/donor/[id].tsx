@@ -271,7 +271,7 @@ export default function DonorDetailScreen() {
                 receiverId:   donor.id,
                 receiverName: encodeURIComponent(donor.full_name ?? 'Donor'),
             },
-        } as any);
+        });
     }, [donor, user?.id, chatRequestId, router]);
 
     const handleOpenMap = useCallback(() => {
@@ -474,7 +474,7 @@ export default function DonorDetailScreen() {
                             return (
                                 <TouchableOpacity
                                     key={resp.id}
-                                    onPress={() => router.push(`/request/${req.id}`)}
+                                    onPress={() => router.push({ pathname: '/request/[id]', params: { id: req.id } })}
                                     activeOpacity={0.75}
                                 >
                                     <View style={[styles.historyRow, { backgroundColor: theme.cardElevated, borderColor: theme.border }]}>

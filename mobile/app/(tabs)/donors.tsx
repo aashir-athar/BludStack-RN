@@ -69,7 +69,7 @@ export default function DonorsScreen() {
 
   const onCardPress = useCallback((r: BloodRequest) => {
     Haptics.selectionAsync().catch(() => {});
-    router.push(`/request/${r.id}` as any);
+    router.push({ pathname: '/request/[id]', params: { id: r.id } });
   }, [router]);
 
   const onModeChange = useCallback((m: ViewMode) => {
