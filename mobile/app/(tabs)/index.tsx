@@ -166,9 +166,9 @@ export default function HomeScreen() {
       {criticalCount > 0 && (
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <View style={[styles.criticalBadge, { backgroundColor: `${theme.primary}15`, borderColor: `${theme.primary}30` }]}>
+            <View style={[styles.criticalBadge, { backgroundColor: theme.primarySoft, borderColor: theme.primary }]}>
               <Text style={[styles.criticalBadgeText, { color: theme.primary }]}>
-                🚨 CRITICAL — NEEDS IMMEDIATE RESPONSE
+                CRITICAL · NEEDS IMMEDIATE RESPONSE
               </Text>
             </View>
           </View>

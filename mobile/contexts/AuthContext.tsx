@@ -121,24 +121,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let profileChannel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
 
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s);
-      if (s?.user?.id) {
-        fetchProfile(s.user.id).finally(() => setLoading(false));
-        profileChannel = supabase
-          .channel(`profile_${s.user.id}`)
-          .on('postgres_changes', {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'profiles',
-            filter: `id=eq.${s.user.id}`,
-          }, () => fetchProfile(s.user.id))
-          .subscribe();
-      } else {
+    // 1. Read cached session from storage.
+    // 2. Validate it against the server with getUser() — if the token is
+    //    expired, the user no longer exists, or we switched Supabase projects,
+    //    the cached session is bogus and must be signed out before any
+    //    redirect runs. This is the actual fix for "not authenticated still
+    //    routes to onboarding".
+    (async () => {
+      const { data: { session: s } } = await supabase.auth.getSession();
+      if (cancelled) return;
+
+      if (!s?.user?.id) {
+        setSession(null);
+        setProfile(null);
         setLoading(false);
+        return;
       }
-    });
+
+      const { data: userCheck, error: userErr } = await supabase.auth.getUser();
+      if (cancelled) return;
+
+      if (userErr || !userCheck?.user?.id) {
+        // Cached session is stale — wipe it locally so /(auth) is reachable.
+        await supabase.auth.signOut().catch(() => {});
+        setSession(null);
+        setProfile(null);
+        setLoading(false);
+        return;
+      }
+
+      setSession(s);
+      await fetchProfile(s.user.id);
+      if (!cancelled) setLoading(false);
+
+      profileChannel = supabase
+        .channel(`profile_${s.user.id}`)
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${s.user.id}`,
+        }, () => fetchProfile(s.user.id))
+        .subscribe();
+    })();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
@@ -164,6 +191,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => {
+      cancelled = true;
       subscription.unsubscribe();
       if (profileChannel) supabase.removeChannel(profileChannel);
     };
