@@ -94,4 +94,8 @@ async function logout(req, res, next) {
   }
 }
 
+<<<<<<< HEAD
 module.exports = { getMe, register, logout };
+=======
+module.exports = { getMe, register, logout };
+>>>>>>> 49202d67bd59792b4429cfd0a90fbf7f58c45535

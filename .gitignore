@@ -1,22 +1,31 @@
+# ── Dependencies ──────────────────────────────────────────────
 node_modules/
+
+# ── Build output ──────────────────────────────────────────────
+dist/
+web-build/
+coverage/
+ios/
+android/
+
+# ── Environment / secrets ─────────────────────────────────────
 .env
 .env.local
 .env.example
-*.log
-dist/
-coverage/
-.DS_Store
-
-node_modules/
-.expo/
-dist/
-web-build/
-.env.local
-.env
 *.local
-ios/
-android/
+
+# ── Editor / OS ───────────────────────────────────────────────
 .DS_Store
 *.log
+
+# ── Expo ──────────────────────────────────────────────────────
+.expo/
 expo-env.d.ts
-# @end expo-cli
+
+# ── Archive artifacts (never commit zips) ─────────────────────
+*.zip
+backup.zip
+frontend.zip
+mobile.zip
+mobile-frontend.zip
+backend.zip
