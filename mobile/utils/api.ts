@@ -1,94 +1,188 @@
 // utils/api.ts
-// Centralized API service — calls backend when available, falls back to Supabase directly.
-// Backend: https://bludstack-rn-production.up.railway.app
+// ─────────────────────────────────────────────────────────────────────────────
+// Centralised backend client.
+//
+// After the production-hardening pass, the mobile app is FORBIDDEN from doing
+// these things directly against Supabase (RLS will reject them):
+//   • Reading or writing other users' push_token, latitude, longitude
+//   • Inserting into blood_requests
+//   • Inserting / updating request_responses
+//   • Mutating its own total_donations, last_donation_date, role, is_verified
+// All of those operations now go through the backend API, which uses the
+// service_role key and runs server-side validation + atomic RPCs.
+//
+// Mobile still uses Supabase directly for:
+//   • Auth (signInWithOtp, verifyOtp, getSession)
+//   • Realtime subscriptions on its OWN profile + own blood_requests + own
+//     request_responses (RLS allows the SELECTs)
+//   • Reading public_profiles view for leaderboards
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { supabase } from './supabase';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://bludstack-rn-production.up.railway.app/api/v1';
+export const BACKEND_URL =
+  process.env.EXPO_PUBLIC_API_URL ?? 'https://bludstack-rn-production.up.railway.app/api/v1';
 
-async function getAuthHeader(): Promise<Record<string, string>> {
+export class ApiError extends Error {
+  status: number;
+  data?: unknown;
+  constructor(message: string, status: number, data?: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.data = data;
+  }
+}
+
+async function authHeader(): Promise<Record<string, string>> {
   const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.access_token) return {};
-  return { Authorization: `Bearer ${session.access_token}` };
+  return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
 }
 
-async function backendPost<T>(path: string, body: object): Promise<T | null> {
-  try {
-    const headers = await getAuthHeader();
-    const res = await fetch(`${BACKEND_URL}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      console.warn(`[api] POST ${path} → ${res.status}:`, err?.error ?? res.statusText);
-      return null;
-    }
-    const data = await res.json();
-    return data?.data ?? data;
-  } catch (e: any) {
-    console.warn(`[api] POST ${path} failed:`, e.message);
-    return null;
+type RequestOpts = { signal?: AbortSignal };
+
+async function request<T>(
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+  path: string,
+  body?: object,
+  opts: RequestOpts = {},
+): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(await authHeader()),
+  };
+
+  const res = await fetch(`${BACKEND_URL}${path}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal: opts.signal,
+  });
+
+  let json: any = null;
+  try { json = await res.json(); } catch { /* empty body */ }
+
+  if (!res.ok) {
+    const message = json?.error ?? json?.message ?? `Request failed (${res.status})`;
+    throw new ApiError(message, res.status, json);
   }
+
+  // Backend wraps successful responses as { success: true, data, message }.
+  // Some endpoints return data directly — handle both.
+  return (json?.data ?? json) as T;
 }
 
-async function backendPatch<T>(path: string, body: object): Promise<T | null> {
-  try {
-    const headers = await getAuthHeader();
-    const res = await fetch(`${BACKEND_URL}${path}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data?.data ?? data;
-  } catch (e: any) {
-    console.warn(`[api] PATCH ${path} failed:`, e.message);
-    return null;
-  }
-}
+// ── Auth ─────────────────────────────────────────────────────────────────────
+export const apiGetMe = () => request<unknown>('GET', '/auth/me');
 
-// ── POST /requests → triggers geo-fencing on backend ─────────────────────────
-export async function apiCreateRequest(payload: {
-  blood_group: string; urgency: string; units_needed: number;
-  hospital_name: string; hospital_address: string;
-  latitude: number; longitude: number; notes?: string;
-}) {
-  return backendPost('/requests', payload);
-}
+export type RegisterPayload = {
+  full_name: string;
+  blood_group: string;
+  gender?: string;
+  date_of_birth?: string | null;
+  phone?: string | null;
+  whatsapp_available?: boolean;
+  medical_conditions?: string[];
+  share_medical_history?: boolean;
+  is_available_to_donate?: boolean;
+  role?: 'donor' | 'recipient' | 'both';
+};
+export const apiRegister = (payload: RegisterPayload) =>
+  request<{ profile: unknown; downgraded: boolean }>('POST', '/auth/register', payload);
 
-// ── POST /donations/accept → validates 90-day, sends notifications ─────────────
-export async function apiAcceptRequest(requestId: string) {
-  return backendPost('/donations/accept', { requestId });
-}
+export const apiLogout = () => request<null>('POST', '/auth/logout');
 
-// ── POST /donations/decline ───────────────────────────────────────────────────
-export async function apiDeclineRequest(requestId: string) {
-  return backendPost('/donations/decline', { requestId });
-}
+// ── Profile ──────────────────────────────────────────────────────────────────
+export type ProfilePatch = Partial<{
+  full_name: string;
+  gender: string;
+  date_of_birth: string | null;
+  avatar_url: string | null;
+  blood_group: string;
+  medical_conditions: string[];
+  share_medical_history: boolean;
+  is_available_to_donate: boolean;
+  address: string | null;
+}>;
+export const apiUpdateProfile = (patch: ProfilePatch) =>
+  request<unknown>('PATCH', '/profiles/me', patch);
 
-// ── POST /donations/complete → updates donor stats in DB ─────────────────────
-export async function apiCompleteDonation(requestId: string, donorId: string) {
-  return backendPost('/donations/complete', { requestId, donorId });
-}
+export const apiUpdateLocation = (latitude: number, longitude: number) =>
+  request<unknown>('PATCH', '/profiles/me/location', { latitude, longitude });
 
-// ── PATCH /profiles/me/location ───────────────────────────────────────────────
-export async function apiUpdateLocation(latitude: number, longitude: number) {
-  // Try backend first, fall back to direct Supabase
-  const result = await backendPatch('/profiles/me/location', { latitude, longitude });
-  if (!result) {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user?.id) {
-      await supabase.from('profiles').update({ latitude, longitude }).eq('id', session.user.id);
-    }
-  }
-}
+export type NearbyDonorsQuery = { lat: number; lon: number; radiusKm?: number; bloodGroup?: string };
+export const apiNearbyDonors = (q: NearbyDonorsQuery) => {
+  const qs = new URLSearchParams({
+    lat: String(q.lat), lon: String(q.lon),
+    ...(q.radiusKm   ? { radiusKm:   String(q.radiusKm)  } : {}),
+    ...(q.bloodGroup ? { bloodGroup: q.bloodGroup        } : {}),
+  });
+  return request<{ donors: unknown[]; count: number; radiusKm: number }>('GET', `/profiles/nearby-donors?${qs}`);
+};
 
-// ── PUT /notifications/token ──────────────────────────────────────────────────
-export async function apiRegisterPushToken(token: string) {
-  return backendPatch('/notifications/token', { token });
-}
+// ── Blood Requests ───────────────────────────────────────────────────────────
+export type CreateRequestPayload = {
+  blood_group: string;
+  urgency: 'critical' | 'urgent' | 'standard';
+  units_needed: number;
+  hospital_name: string;
+  hospital_address: string;
+  latitude: number;
+  longitude: number;
+  notes?: string;
+};
+export const apiCreateRequest = (payload: CreateRequestPayload) =>
+  request<unknown>('POST', '/requests', payload);
 
-export { BACKEND_URL };
+export type ListRequestsQuery = {
+  lat?: number; lon?: number; radiusKm?: number;
+  bloodGroup?: string; urgency?: string;
+  page?: number; limit?: number;
+};
+export const apiListRequests = (q: ListRequestsQuery = {}) => {
+  const qs = new URLSearchParams();
+  if (q.lat !== undefined)        qs.set('lat',        String(q.lat));
+  if (q.lon !== undefined)        qs.set('lon',        String(q.lon));
+  if (q.radiusKm !== undefined)   qs.set('radiusKm',   String(q.radiusKm));
+  if (q.bloodGroup)               qs.set('bloodGroup', q.bloodGroup);
+  if (q.urgency)                  qs.set('urgency',    q.urgency);
+  if (q.page !== undefined)       qs.set('page',       String(q.page));
+  if (q.limit !== undefined)      qs.set('limit',      String(q.limit));
+  const suffix = qs.toString() ? `?${qs}` : '';
+  return request<{ requests: any[]; pagination: any }>('GET', `/requests${suffix}`);
+};
+
+export const apiGetRequest = (id: string) => request<any>('GET', `/requests/${id}`);
+export const apiGetMyRequests = () => request<any[]>('GET', '/requests/my');
+export const apiCancelRequest = (id: string) =>
+  request<unknown>('PATCH', `/requests/${id}/status`, { status: 'cancelled' });
+export const apiDeleteRequest = (id: string) => request<null>('DELETE', `/requests/${id}`);
+
+// ── Donations ────────────────────────────────────────────────────────────────
+export const apiAcceptRequest = (requestId: string) =>
+  request<{ responseId: string; request: unknown }>('POST', '/donations/accept', { requestId });
+
+export const apiDeclineRequest = (requestId: string) =>
+  request<null>('POST', '/donations/decline', { requestId });
+
+export const apiCompleteDonation = (requestId: string, donorId: string) =>
+  request<{ requestId: string; donorId: string; totalDonations: number }>(
+    'POST', '/donations/complete', { requestId, donorId },
+  );
+
+export const apiDonationHistory = () => request<any[]>('GET', '/donations/history');
+
+// ── Notifications ────────────────────────────────────────────────────────────
+export const apiRegisterPushToken = (token: string) =>
+  request<unknown>('PUT', '/notifications/token', { token });
+
+export const apiRemovePushToken = () =>
+  request<null>('DELETE', '/notifications/token');
+
+export const apiSendTestNotification = () =>
+  request<unknown>('POST', '/notifications/test', {});
+
+// ── Stats ────────────────────────────────────────────────────────────────────
+export const apiCommunityStats   = () => request<any>('GET', '/stats/community');
+export const apiLeaderboard      = () => request<any[]>('GET', '/stats/leaderboard');
+export const apiBloodAvailability = () => request<any>('GET', '/stats/blood-availability');

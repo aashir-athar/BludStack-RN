@@ -16,6 +16,7 @@ import * as Location from 'expo-location';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/utils/supabase';
+import { apiUpdateLocation } from '@/utils/api';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import { FontSize, FontWeight, Spacing, BorderRadius } from '@/constants/Typography';
@@ -53,14 +54,15 @@ export default function LiveMapScreen() {
     }
 
     watchSub.current = await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
+      // Throttle: 15s + 50m minimum movement. Backend handles persistence.
+      { accuracy: Location.Accuracy.High, timeInterval: 15_000, distanceInterval: 50 },
       async (pos) => {
         const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
         setMyLocation(coords);
         setWatching(true);
-        // Update in DB for real-time sharing
         if (user?.id) {
-          await supabase.from('profiles').update(coords).eq('id', user.id);
+          try { await apiUpdateLocation(coords.latitude, coords.longitude); }
+          catch { /* keep last-known on error — live tracking is best-effort */ }
         }
       }
     );

@@ -1,6 +1,7 @@
 // src/controllers/notificationController.js
 'use strict';
 
+const { Expo }                  = require('expo-server-sdk');
 const { supabaseAdmin }         = require('../utils/supabaseAdmin');
 const { success, error }        = require('../utils/response');
 const { sendPushNotifications } = require('../services/notificationService');
@@ -18,7 +19,6 @@ async function registerToken(req, res, next) {
       return error(res, 'push token is required', 400);
     }
 
-    const { Expo } = require('expo-server-sdk');
     if (!Expo.isExpoPushToken(token)) {
       return error(res, 'Invalid Expo push token format', 400);
     }

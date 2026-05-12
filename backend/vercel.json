@@ -1,0 +1,21 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "buildCommand": null,
+  "installCommand": "npm install",
+  "framework": null,
+  "functions": {
+    "api/index.js":              { "memory": 512, "maxDuration": 30 },
+    "api/cron/tick-geofence.js": { "memory": 512, "maxDuration": 60 },
+    "api/cron/expire-requests.js": { "memory": 512, "maxDuration": 60 }
+  },
+  "rewrites": [
+    { "source": "/health",      "destination": "/api/index" },
+    { "source": "/api/v1/(.*)", "destination": "/api/index" },
+    { "source": "/",            "destination": "/api/index" }
+  ],
+  "crons": [
+    { "path": "/api/cron/tick-geofence",   "schedule": "* * * * *" },
+    { "path": "/api/cron/expire-requests", "schedule": "*/10 * * * *" }
+  ]
+}

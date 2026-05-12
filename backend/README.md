@@ -270,7 +270,32 @@ Expiry windows by urgency:
 
 ## Deployment
 
-### Option A — Railway (recommended, free hobby tier)
+> **Geo-fence frequency differs by host.**
+> - On **Railway / Render / self-hosted** the `startWorker()` in `src/server.js` runs an in-process `setInterval` that ticks every **5 seconds**.
+> - On **Vercel** the same logic runs through Vercel Cron (`api/cron/tick-geofence.js`). Vercel's minimum cron interval is **1 minute on Pro / 1 hour on Hobby**. If sub-minute ring expansion matters, deploy to Railway/Render.
+> - Rate-limit state is in-memory (express-rate-limit default). On Vercel each cold start has its own bucket — for production-grade rate limiting on Vercel, swap in `rate-limit-redis` with Upstash.
+
+### Option A — Vercel (serverless, $0–$20/mo)
+
+1. Push this folder to a GitHub repo
+2. [vercel.com](https://vercel.com) → Add New → Project → import the repo
+3. Set the **Root Directory** to `backend/`
+4. Set environment variables in Project Settings → Environment Variables:
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `NODE_ENV=production`
+   - `ALLOWED_ORIGINS=https://your-app-domain.com`
+   - `TRUST_PROXY=1`
+   - `CRON_SECRET` (auto-set by Vercel when you add a cron job)
+5. Deploy. Vercel reads `vercel.json` and wires up:
+   - `/api/v1/*` → Express app (via `api/index.js`)
+   - `/health` → Express app
+   - Cron: `* * * * *` → `/api/cron/tick-geofence` (Pro tier) — drives ring expansion
+   - Cron: `*/10 * * * *` → `/api/cron/expire-requests` — expires stale requests
+
+Your API will be at: `https://<your-project>.vercel.app/api/v1/...`
+
+### Option B — Railway (recommended, free hobby tier)
 
 1. Push this folder to a GitHub repo
 2. Go to [railway.app](https://railway.app) → New Project → Deploy from GitHub
@@ -284,7 +309,7 @@ Expiry windows by urgency:
 
 Your API will be at: `https://bludstack-api.up.railway.app`
 
-### Option B — Render (free tier with spin-down)
+### Option C — Render (free tier with spin-down)
 
 1. Push to GitHub
 2. Go to [render.com](https://render.com) → New → Web Service
@@ -294,7 +319,7 @@ Your API will be at: `https://bludstack-api.up.railway.app`
 
 > **Note:** Render free tier spins down after 15 min of inactivity. First request after spin-down takes ~30s. Use Railway for always-on free hosting.
 
-### Option C — Self-hosted (VPS / DigitalOcean)
+### Option D — Self-hosted (VPS / DigitalOcean)
 
 ```bash
 # On your server
