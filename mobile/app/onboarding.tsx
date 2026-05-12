@@ -49,6 +49,11 @@ import {
 import { errorReporter } from '@/lib/errorReporter';
 
 const MIN_DONOR_AGE = 18;
+// WHO + most national blood-bank guidelines cap whole-blood donation at 65.
+// Above that, the cardiovascular load of a 450 ml draw isn't safe to assume
+// without a doctor's individual sign-off — out of scope for an app gate.
+// Recipients have no upper-age limit.
+const MAX_DONOR_AGE = 65;
 
 type StepKey =
   | 'role'
@@ -152,7 +157,12 @@ export default function OnboardingScreen() {
 
   // Role-aware step ordering — donors/both see DOB + medical; recipients skip.
   const steps = useMemo<StepKey[]>(() => {
-    if (form.role === 'recipient') return ['role', 'identity', 'blood', 'contact', 'confirm'];
+    // DOB is shown to EVERY role.
+    //   • Donor / Both → required + age-gated 18+ (validated below).
+    //   • Recipient    → optional, can leave blank and continue. DobStep's
+    //                    subtitle reads "Optional — helps us serve you better"
+    //                    when roleRequiresAge18 is false.
+    if (form.role === 'recipient') return ['role', 'identity', 'dob', 'blood', 'contact', 'confirm'];
     if (form.role === '')          return ['role'];
     return ['role', 'identity', 'dob', 'blood', 'medical', 'contact', 'confirm'];
   }, [form.role]);
@@ -203,11 +213,21 @@ export default function OnboardingScreen() {
         break;
       case 'dob': {
         const iso = dobISO();
-        if (!iso) { setError('dob', 'Enter a valid date of birth'); return false; }
+        const isDonorLike = form.role === 'donor' || form.role === 'both';
+        // Recipients can skip DOB entirely — leave blank and continue.
+        // Donors / Both must enter a valid DOB AND be 18+.
+        if (!iso) {
+          if (isDonorLike) { setError('dob', 'Enter a valid date of birth'); return false; }
+          break; // recipient: blank DOB is allowed
+        }
         const age = computeAge(iso);
         if (age === null || age < 1 || age > 120) { setError('dob', "That date doesn't look right"); return false; }
-        if ((form.role === 'donor' || form.role === 'both') && age < MIN_DONOR_AGE) {
+        if (isDonorLike && age < MIN_DONOR_AGE) {
           setError('dob', `Donors must be ${MIN_DONOR_AGE} or older — switch to "Receive only" if you'd like to keep going`);
+          return false;
+        }
+        if (isDonorLike && age > MAX_DONOR_AGE) {
+          setError('dob', `Donors must be ${MAX_DONOR_AGE} or younger — switch to "Receive only" if you'd like to keep going`);
           return false;
         }
         break;
@@ -245,7 +265,7 @@ export default function OnboardingScreen() {
 
       if (downgraded) {
         toast.warning('Switched to recipient', {
-          description: `Donors must be ${MIN_DONOR_AGE}+. You can still post requests anytime.`,
+          description: `Donors must be ${MIN_DONOR_AGE}–${MAX_DONOR_AGE}. You can still post requests anytime.`,
           duration: 6000,
         });
       } else {
@@ -616,7 +636,11 @@ function DobStep({
   onPickerChange: (e: DateTimePickerEvent, d?: Date) => void;
 }) {
   const { theme } = useTheme();
-  const eligible = age !== null && age >= MIN_DONOR_AGE;
+  // Donor eligibility window: 18-65 inclusive. Outside this range we surface
+  // a warning pill and (on submit) downgrade to recipient.
+  const tooYoung = age !== null && age < MIN_DONOR_AGE;
+  const tooOld   = age !== null && age > MAX_DONOR_AGE;
+  const eligible = age !== null && !tooYoung && !tooOld;
   const showHelper = age !== null;
 
   return (
@@ -674,9 +698,11 @@ function DobStep({
           />
           <Text style={[dobHelperStyles.text, { color: theme.textPrimary }]}>
             {`You're ${age}. `}
-            {roleRequiresAge18 && !eligible
+            {roleRequiresAge18 && tooYoung
               ? `Donors need to be ${MIN_DONOR_AGE}+ — we'll switch you to recipient.`
-              : 'Looks good.'}
+              : roleRequiresAge18 && tooOld
+                ? `Donors must be ${MAX_DONOR_AGE} or younger — we'll switch you to recipient.`
+                : 'Looks good.'}
           </Text>
         </View>
       )}

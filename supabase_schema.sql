@@ -79,12 +79,18 @@ create table if not exists public.profiles (
   constraint profiles_longitude_range check (longitude is null or (longitude between -180 and 180)),
   constraint profiles_total_donations_nonneg check (total_donations >= 0),
 
-  -- ── Age gate: donors must be 18+ ────────────────────────────────────────
-  -- Recipients can be any age. 'both' implies donor capability, so 18+ required.
+  -- ── Age gate: donors must be 18-65 ──────────────────────────────────────
+  -- Recipients can be any age. 'both' implies donor capability, so the
+  -- 18-65 window applies. The upper bound matches WHO + most national
+  -- blood-bank guidelines for whole-blood donation. `date_of_birth > today
+  -- - 66 years` means "younger than 66", i.e. still 65 today.
   constraint profiles_donor_age check (
     role = 'recipient'
     or date_of_birth is null
-    or date_of_birth <= (current_date - interval '18 years')
+    or (
+          date_of_birth <= (current_date - interval '18 years')
+      and date_of_birth >  (current_date - interval '66 years')
+    )
   )
 );
 

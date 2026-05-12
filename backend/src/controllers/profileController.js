@@ -82,8 +82,9 @@ async function updateMyProfile(req, res, next) {
         }
         const ageMs = Date.now() - new Date(dobIso).getTime();
         const ageYears = ageMs / (365.25 * 86_400_000);
-        if (ageYears < 18) {
-          return error(res, 'Donor role requires age 18+', 400);
+        // Donor eligibility window: 18-65 inclusive (WHO standard).
+        if (ageYears < 18 || ageYears > 65) {
+          return error(res, 'Donor role requires age 18–65', 400);
         }
       }
       updates.role = req.body.role;
