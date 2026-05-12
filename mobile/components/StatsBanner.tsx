@@ -20,7 +20,8 @@ const StatsBanner = React.memo(function StatsBanner() {
         if (cancelled) return;
         const donations = data?.total_donations ?? data?.donations ?? 0;
         const donors    = data?.active_donors   ?? data?.donors    ?? 0;
-        const lives     = data?.lives_helped    ?? data?.lives     ?? donations * 3;
+        // 1 donor = 1 unit = 1 life. No 3x multiplier inflation.
+        const lives     = data?.lives_helped    ?? data?.lives     ?? donations;
         setStats({ donations, donors, lives });
       } catch {
         // Stats are non-critical — silently keep zeros
@@ -50,7 +51,7 @@ function Stat({ label, value, color, theme }: { label: string; value: number; co
 }
 
 const styles = StyleSheet.create({
-  row:       { flexDirection: 'row', borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.md, paddingVertical: Spacing[4] },
+  row:       { flexDirection: 'row', borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.xl, paddingVertical: Spacing[4] },
   sep:       { width: StyleSheet.hairlineWidth, marginVertical: Spacing[1] },
   stat:      { flex: 1, alignItems: 'center', gap: 2 },
   statNum:   { fontSize: FontSize.xl, fontWeight: FontWeight.black, letterSpacing: LetterSpacing.tight },

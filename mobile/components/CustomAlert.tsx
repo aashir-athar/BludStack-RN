@@ -70,6 +70,12 @@ const CustomAlert = React.memo(function CustomAlert({
                         transform: [{ scale: scaleAnim }],
                     },
                 ]}>
+                    {/* Brand accent strip + handle — Request-screen sheet parity */}
+                    <View style={styles.sheetTop}>
+                        <View style={[styles.accentStrip, { backgroundColor: theme.primary }]} />
+                        <View style={[styles.handle, { backgroundColor: theme.borderStrong }]} />
+                    </View>
+
                     {/* Icon */}
                     {icon && <Text style={styles.icon}>{icon}</Text>}
 
@@ -148,6 +154,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingTop: Spacing[6],
     },
+    sheetTop:    { alignItems: 'center', paddingTop: Spacing[3], paddingBottom: Spacing[2] },
+    accentStrip: { width: 36, height: 3, borderRadius: 2, marginBottom: Spacing[1], opacity: 0.9 },
+    handle:      { width: 44, height: 4, borderRadius: 2 },
     icon: { fontSize: 40, marginBottom: Spacing[3] },
     title: {
         fontSize: FontSize.lg,

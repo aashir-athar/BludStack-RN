@@ -148,10 +148,18 @@ create table if not exists public.request_responses (
   request_id uuid not null references public.blood_requests(id) on delete cascade,
   donor_id   uuid not null references public.profiles(id)       on delete cascade,
   status     response_status_enum not null default 'pending',
+  -- Live donor location, pushed by the donor's app via /donations/heartbeat
+  -- while they're en-route to the hospital after accept. The recipient reads
+  -- this via the existing request_responses_select_visible policy.
+  donor_lat                  double precision,
+  donor_lon                  double precision,
+  donor_location_updated_at  timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
 
-  constraint request_responses_unique unique (request_id, donor_id)
+  constraint request_responses_unique unique (request_id, donor_id),
+  constraint request_responses_donor_lat_range check (donor_lat is null or (donor_lat between -90  and 90)),
+  constraint request_responses_donor_lon_range check (donor_lon is null or (donor_lon between -180 and 180))
 );
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -262,18 +270,22 @@ security definer
 set search_path = public
 as $$
 declare
-  v_status         request_status_enum;
-  v_recipient_id   uuid;
-  v_units_needed   integer;
-  v_accepted_count integer;
-  v_existing       response_status_enum;
-  v_resp_id        uuid;
+  v_status            request_status_enum;
+  v_recipient_id      uuid;
+  v_units_needed      integer;
+  v_accepted_count    integer;
+  v_existing          response_status_enum;
+  v_resp_id           uuid;
+  v_other_commitment  uuid;
 begin
-  -- Lock the request row for the duration of this transaction
-  select status, recipient_id, units_needed
+  -- Lock the request row for the duration of this transaction.
+  -- Every column reference is alias-qualified — without that, PG treats
+  -- "status" as ambiguous between the table column and the RETURNS TABLE
+  -- output column with the same name (error 42702).
+  select br.status, br.recipient_id, br.units_needed
     into v_status, v_recipient_id, v_units_needed
-    from public.blood_requests
-   where id = p_request_id
+    from public.blood_requests br
+   where br.id = p_request_id
    for update;
 
   if not found then
@@ -292,31 +304,56 @@ begin
   end if;
 
   -- Idempotency: if donor already accepted, return existing record
-  select status into v_existing
-    from public.request_responses
-   where request_id = p_request_id and donor_id = p_donor_id
+  select rr.status into v_existing
+    from public.request_responses rr
+   where rr.request_id = p_request_id and rr.donor_id = p_donor_id
    for update;
 
   if v_existing = 'accepted' then
-    select id into v_resp_id from public.request_responses
-     where request_id = p_request_id and donor_id = p_donor_id;
-    return query select v_resp_id, 'accepted'::response_status_enum, 'Already accepted';
+    select rr.id into v_resp_id from public.request_responses rr
+     where rr.request_id = p_request_id and rr.donor_id = p_donor_id;
+    return query select v_resp_id, 'accepted'::response_status_enum, 'Already accepted'::text;
     return;
   end if;
 
   if v_existing = 'completed' then
-    select id into v_resp_id from public.request_responses
-     where request_id = p_request_id and donor_id = p_donor_id;
-    return query select v_resp_id, 'completed'::response_status_enum, 'Already completed';
+    select rr.id into v_resp_id from public.request_responses rr
+     where rr.request_id = p_request_id and rr.donor_id = p_donor_id;
+    return query select v_resp_id, 'completed'::response_status_enum, 'Already completed'::text;
+    return;
+  end if;
+
+  -- ────────────────────────────────────────────────────────────────────────
+  -- ONE-ACTIVE-COMMITMENT RULE
+  -- ────────────────────────────────────────────────────────────────────────
+  -- A donor can only have ONE outstanding `accepted` response at a time —
+  -- i.e. they cannot commit to a second request while a prior commitment is
+  -- still in flight on an `active` blood_request. The block clears when:
+  --   (a) the prior response is marked `completed` (donation recorded), or
+  --   (b) the prior request flips to `fulfilled`, `cancelled`, or `expired`.
+  -- Checked here (server-side), authoritative regardless of client state.
+  select rr.request_id
+    into v_other_commitment
+    from public.request_responses rr
+    join public.blood_requests br on br.id = rr.request_id
+   where rr.donor_id  = p_donor_id
+     and rr.status    = 'accepted'
+     and rr.request_id <> p_request_id
+     and br.status    = 'active'
+   limit 1;
+
+  if v_other_commitment is not null then
+    return query select null::uuid, null::response_status_enum,
+      'You already committed to another active request — complete or cancel that one first';
     return;
   end if;
 
   -- Capacity check inside the same transaction (race-free)
   select count(*)
     into v_accepted_count
-    from public.request_responses
-   where request_id = p_request_id
-     and status = 'accepted';
+    from public.request_responses rr
+   where rr.request_id = p_request_id
+     and rr.status = 'accepted';
 
   if v_accepted_count >= v_units_needed then
     return query select null::uuid, null::response_status_enum,
@@ -349,47 +386,51 @@ security definer
 set search_path = public
 as $$
 declare
-  v_status         request_status_enum;
-  v_recipient_id   uuid;
-  v_resp_status    response_status_enum;
-  v_resp_id        uuid;
-  v_new_total      integer;
+  v_status              request_status_enum;
+  v_recipient_id        uuid;
+  v_units_needed        integer;
+  v_completed_count     integer;
+  v_resp_status         response_status_enum;
+  v_resp_id             uuid;
+  v_new_total           integer;
 begin
-  select status, recipient_id
-    into v_status, v_recipient_id
-    from public.blood_requests
-   where id = p_request_id
+  select br.status, br.recipient_id, br.units_needed
+    into v_status, v_recipient_id, v_units_needed
+    from public.blood_requests br
+   where br.id = p_request_id
    for update;
 
   if not found then
-    return query select null::integer, 'Request not found';
+    return query select null::integer, 'Request not found'::text;
     return;
   end if;
 
   if v_recipient_id <> p_caller_id then
-    return query select null::integer, 'Not authorised';
+    return query select null::integer, 'Not authorised'::text;
     return;
   end if;
 
-  if v_status <> 'active' then
+  -- Accept either 'active' or already-flipped 'fulfilled' (idempotent path
+  -- when a multi-unit request partially completed but later gets revisited).
+  if v_status not in ('active','fulfilled') then
     return query select null::integer, format('Request already %s', v_status);
     return;
   end if;
 
-  select id, status
+  select rr.id, rr.status
     into v_resp_id, v_resp_status
-    from public.request_responses
-   where request_id = p_request_id and donor_id = p_donor_id
+    from public.request_responses rr
+   where rr.request_id = p_request_id and rr.donor_id = p_donor_id
    for update;
 
   if v_resp_id is null then
-    return query select null::integer, 'Donor has not accepted this request';
+    return query select null::integer, 'Donor has not accepted this request'::text;
     return;
   end if;
 
   if v_resp_status = 'completed' then
-    select total_donations into v_new_total from public.profiles where id = p_donor_id;
-    return query select v_new_total, 'Already completed';
+    select p.total_donations into v_new_total from public.profiles p where p.id = p_donor_id;
+    return query select v_new_total, 'Already completed'::text;
     return;
   end if;
 
@@ -398,15 +439,34 @@ begin
     return;
   end if;
 
+  -- Flip this donor's response to completed
   update public.request_responses set status = 'completed' where id = v_resp_id;
-  update public.blood_requests    set status = 'fulfilled', donor_id = p_donor_id where id = p_request_id;
-  update public.profiles
-     set total_donations    = total_donations + 1,
-         last_donation_date = now()
-   where id = p_donor_id
-  returning total_donations into v_new_total;
 
-  return query select v_new_total, 'OK';
+  -- Bump donor stats. Table alias disambiguates `total_donations` from the
+  -- RETURNS TABLE output column with the same name.
+  update public.profiles p
+     set total_donations    = p.total_donations + 1,
+         last_donation_date = now()
+   where p.id = p_donor_id;
+
+  select p.total_donations into v_new_total
+    from public.profiles p
+   where p.id = p_donor_id;
+
+  -- N donors = N units: only flip the REQUEST to fulfilled when all units
+  -- are completed. A 3-unit request stays active until 3 distinct donors
+  -- have completed.
+  select count(*) into v_completed_count
+    from public.request_responses rr
+   where rr.request_id = p_request_id and rr.status = 'completed';
+
+  if v_completed_count >= v_units_needed then
+    update public.blood_requests
+       set status = 'fulfilled', donor_id = p_donor_id
+     where id = p_request_id;
+  end if;
+
+  return query select v_new_total, 'OK'::text;
 end $$;
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -469,6 +529,35 @@ create policy "profiles_select_own"
   on public.profiles for select
   using (auth.uid() = id);
 
+-- ── Mutual-commitment disclosure ──────────────────────────────────────────
+-- Once a donor accepts a recipient's request, both parties need to see each
+-- other's profile (name, contact, blood group, eligibility) to coordinate the
+-- donation. This second permissive SELECT policy unlocks the join so the
+-- request detail screen can render the ProfileCard for the other party.
+--   • Visibility opens on `accepted` and stays open through `completed` so
+--     post-donation chat and follow-up still resolve names.
+--   • A `declined` response does NOT unlock anything.
+-- (Multiple policies on the same op are OR-ed by Postgres, so this stays
+-- additive on top of `profiles_select_own`.)
+drop policy if exists "profiles_select_mutual_commitment" on public.profiles;
+create policy "profiles_select_mutual_commitment"
+  on public.profiles for select
+  using (
+    exists (
+      select 1
+        from public.request_responses rr
+        join public.blood_requests   br on br.id = rr.request_id
+       where rr.status in ('accepted', 'completed')
+         and (
+           -- profiles.id is the donor who accepted my (recipient's) request
+           (rr.donor_id     = profiles.id and br.recipient_id = auth.uid())
+           or
+           -- profiles.id is the recipient whose request I (donor) accepted
+           (br.recipient_id = profiles.id and rr.donor_id     = auth.uid())
+         )
+    )
+  );
+
 -- Insert: only via the auth.users trigger (auto-creates row). Authenticated
 -- users can also insert their own row in case the trigger is missing.
 create policy "profiles_insert_own"
@@ -496,10 +585,14 @@ declare
   v_is_service_role boolean;
 begin
   -- Service role bypasses this entirely
-  v_is_service_role := coalesce(
-    current_setting('request.jwt.claim.role', true) = 'service_role',
-    false
-  );
+  -- Multiple detection methods OR-ed — empirically a single check
+  -- (current_setting on the JWT claim) returns NULL in some PostgREST
+  -- configurations even for service_role connections.
+  v_is_service_role :=
+       current_user = 'service_role'
+    or current_role = 'service_role'
+    or coalesce(nullif(current_setting('request.jwt.claim.role', true), ''), '') = 'service_role'
+    or coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') = 'service_role';
   if v_is_service_role then
     return new;
   end if;
@@ -589,10 +682,14 @@ as $$
 declare
   v_is_service_role boolean;
 begin
-  v_is_service_role := coalesce(
-    current_setting('request.jwt.claim.role', true) = 'service_role',
-    false
-  );
+  -- Multiple detection methods OR-ed — empirically a single check
+  -- (current_setting on the JWT claim) returns NULL in some PostgREST
+  -- configurations even for service_role connections.
+  v_is_service_role :=
+       current_user = 'service_role'
+    or current_role = 'service_role'
+    or coalesce(nullif(current_setting('request.jwt.claim.role', true), ''), '') = 'service_role'
+    or coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb->>'role', '') = 'service_role';
   if v_is_service_role then
     return new;
   end if;

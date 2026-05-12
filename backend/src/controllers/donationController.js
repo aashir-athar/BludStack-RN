@@ -206,4 +206,48 @@ async function getDonationHistory(req, res, next) {
   }
 }
 
-module.exports = { acceptRequest, declineRequest, completeDonation, getDonationHistory };
+/**
+ * POST /api/v1/donations/heartbeat
+ * Donor pushes their live GPS while en-route. Updates the donor's
+ * request_responses row IFF caller is the accepted donor on that request.
+ * Recipient subscribes to realtime UPDATEs to draw the live pin.
+ */
+async function heartbeat(req, res, next) {
+  try {
+    const { requestId, latitude, longitude } = req.body;
+    if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+      return error(res, 'latitude and longitude must be numbers', 400);
+    }
+    if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+      return error(res, 'Coordinates out of valid range', 400);
+    }
+
+    const { data: existing, error: lookupErr } = await supabaseAdmin
+      .from('request_responses')
+      .select('id, status')
+      .eq('request_id', requestId)
+      .eq('donor_id',   req.userId)
+      .maybeSingle();
+    if (lookupErr) throw lookupErr;
+    if (!existing) return error(res, "You haven't responded to this request", 404);
+    if (existing.status !== 'accepted') {
+      return error(res, `Heartbeat only for accepted donations (status: ${existing.status})`, 400);
+    }
+
+    const { error: updErr } = await supabaseAdmin
+      .from('request_responses')
+      .update({
+        donor_lat: latitude,
+        donor_lon: longitude,
+        donor_location_updated_at: new Date().toISOString(),
+      })
+      .eq('id', existing.id);
+    if (updErr) throw updErr;
+
+    return success(res, { ok: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { acceptRequest, declineRequest, completeDonation, getDonationHistory, heartbeat };

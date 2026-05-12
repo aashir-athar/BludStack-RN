@@ -1,713 +1,587 @@
-# 🩸 BludStack
+<div align="center">
 
-> **Every drop counts. Every second matters.**
+# BludStack
 
-BludStack is a full-stack blood donation platform that connects people in need of blood with nearby eligible donors in real time. When a blood request is posted, the system automatically expands outward in geo-fenced rings — notifying donors 1 km away first, then 5 km, 15 km, 30 km, 50 km, and finally country-wide — until a donor accepts.
+**The fastest way to find a blood donor.**
+
+A production-grade, real-time blood donation network. Recipients post requests in seconds. Compatible donors nearby are notified instantly. Lives are saved on the same map, in the same minute.
+
+<br />
+
+![Expo SDK](https://img.shields.io/badge/Expo%20SDK-54-000020?logo=expo&logoColor=fff&style=for-the-badge)
+![React Native](https://img.shields.io/badge/React%20Native-0.81-61DAFB?logo=react&logoColor=000&style=for-the-badge)
+![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6?logo=typescript&logoColor=fff&style=for-the-badge)
+![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20Realtime%20%2B%20RLS-3ECF8E?logo=supabase&logoColor=fff&style=for-the-badge)
+![Node](https://img.shields.io/badge/Node-20.x-339933?logo=node.js&logoColor=fff&style=for-the-badge)
+![Vercel](https://img.shields.io/badge/Vercel-Serverless-000?logo=vercel&logoColor=fff&style=for-the-badge)
+
+<br />
+
+![Architecture](https://img.shields.io/badge/Architecture-Atomic%20RPC%20%2B%20RLS-E8002D?style=flat-square)
+![New Architecture](https://img.shields.io/badge/RN%20New%20Arch-Enabled-0F2A4A?style=flat-square)
+![Reanimated](https://img.shields.io/badge/Reanimated-v4%20Worklets-FF6B6B?style=flat-square)
+![FlashList](https://img.shields.io/badge/FlashList-v2-7C4DFF?style=flat-square)
+![Status](https://img.shields.io/badge/Status-Production-00A651?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
+
+<br />
+
+[**Live API**](https://bludstack.vercel.app) · [**Issues**](https://github.com/aashir-athar/BludStack/issues) · [**Discussions**](https://github.com/aashir-athar/BludStack/discussions) · [**Roadmap**](#roadmap)
+
+</div>
 
 ---
 
-## Table of Contents
+## Why BludStack exists
 
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Features](#features)
-- [Geo-Fencing Algorithm](#geo-fencing-algorithm)
-- [Blood Compatibility Logic](#blood-compatibility-logic)
-- [API Reference](#api-reference)
-- [Database Schema](#database-schema)
-- [Backend Setup](#backend-setup)
-- [Mobile App Setup](#mobile-app-setup)
-- [Environment Variables](#environment-variables)
-- [Deployment](#deployment)
-- [Cron Jobs](#cron-jobs)
-- [Push Notifications](#push-notifications)
-- [Security](#security)
+Every two seconds, someone somewhere needs blood. In emergencies, the bottleneck isn't supply — it's the **time it takes to find a compatible donor nearby**. Hospitals call relatives. Relatives forward WhatsApp messages. Messages spread to people who can't help. By the time a compatible donor sees the request, the window is closed.
+
+BludStack flips that. The moment a recipient pins their hospital, our backend expands outward in geo-fenced rings — **1 km → 5 km → 15 km → 30 km → 50 km → country-wide** — pushing real-time alerts only to **compatible, eligible, available donors** at each stage. When a donor accepts, the recipient sees their live GPS heartbeat on a map. Like Uber, but for the most important ride of someone's life.
 
 ---
 
-## Overview
+## Table of contents
 
-BludStack has two main parts:
+1. [Highlights](#highlights)
+2. [Architecture](#architecture)
+3. [Tech stack](#tech-stack)
+4. [Project structure](#project-structure)
+5. [The N-donors rule](#the-n-donors-rule)
+6. [Geo-fence escalation algorithm](#geo-fence-escalation-algorithm)
+7. [Blood compatibility matrix](#blood-compatibility-matrix)
+8. [Design system](#design-system)
+9. [Performance budget](#performance-budget)
+10. [Security model](#security-model)
+11. [Backend setup](#backend-setup)
+12. [Mobile setup](#mobile-setup)
+13. [Environment variables](#environment-variables)
+14. [Deployment](#deployment)
+15. [Cron jobs](#cron-jobs)
+16. [Push notifications](#push-notifications)
+17. [API reference](#api-reference)
+18. [Database schema](#database-schema)
+19. [Roadmap](#roadmap)
+20. [FAQ](#faq)
+21. [Contributing](#contributing)
+22. [License](#license)
+23. [Author](#author)
 
-- **`backend/`** — A Node.js/Express REST API (`bludstack-backend`) that handles authentication, blood requests, donor matching, donation lifecycle, geo-fencing, push notifications, and statistics.
-- **`mobile/`** — A React Native app (`bludstack`) built with Expo SDK 54 and Expo Router, providing the full donor and recipient experience on iOS and Android.
+---
 
-Both parts share Supabase as the database and real-time layer. The backend uses the Supabase **service role** key for privileged operations; the mobile app uses the **anon key** with Supabase Row-Level Security (RLS).
+## Highlights
+
+- **Real-time push escalation** — compatible donors in widening geo-rings are paged in priority order until someone accepts. No SMS fan-out, no group chats, no time wasted on incompatibles.
+- **Atomic accept + complete RPCs** — `accept_blood_request` and `complete_blood_donation` are `SECURITY DEFINER` PostgreSQL functions that enforce capacity, cooldown, age, and the N-donors rule in a single transaction. No race conditions, no double-accepts, no half-fulfilled state.
+- **Live donor heartbeat** — once a donor accepts, foreground GPS pushes their location to `/donations/heartbeat`. The recipient sees the donor moving on a map in real time, Uber-driver style.
+- **N units = N donors** — a 5-unit request needs 5 distinct donors to accept and complete. One donor per unit. No counterfeit fulfilment.
+- **Row-level security everywhere** — every table has RLS policies. Donors only see what they're allowed to see. Recipient phone numbers are never exposed until a donor commits.
+- **Killed-state notifications** — push notifications wake the app from any state on Android and iOS via `expo-notifications` with per-OEM tuning (see `PUSH_NOTIFICATIONS.md`).
+- **120 FPS target on low-end Android** — Reanimated v4 worklets, FlashList v2, memoized cells, expo-image with cache. Tested on Realme/Xiaomi mid-tier devices.
+- **Tri-state theme** — system / dark / light. Crimson on warm onyx (dark) or warm bone (light). All colors flow through theme tokens. Zero hardcoded hex outside `Colors.ts`.
+- **Skeleton loading only** — every loading state is a shimmer placeholder shaped like the content. No spinners, no `ActivityIndicator`, no jarring pop-ins.
+- **No emojis anywhere** — Ionicons + custom SVG (`BrandMark`) for every visual symbol. Period.
+- **No external error monitoring** — `errorReporter` is a typed logger wrapper. No Sentry, no Bugsnag, no Crashlytics. Crash logs stay on-device or in your own server logs.
+- **AsyncStorage everywhere** — never `react-native-mmkv`. Sensitive tokens go through `expo-secure-store`. Auth, query cache, KV all live in `@react-native-async-storage/async-storage`.
 
 ---
 
 ## Architecture
 
-```
-┌────────────────────────────┐        ┌──────────────────────────────┐
-│       Mobile App           │        │        Backend API            │
-│  React Native + Expo 54    │◄──────►│  Node.js + Express           │
-│  Expo Router (file-based)  │  REST  │  Port 4000                   │
-│  Supabase JS (anon key)    │        │  Supabase JS (service role)  │
-└────────────┬───────────────┘        └──────────────┬───────────────┘
-             │                                        │
-             │            ┌───────────────────────────┘
-             └───────────►│         Supabase           │
-                          │  PostgreSQL + Realtime     │
-                          │  Auth (OTP / magic link)   │
-                          │  Row-Level Security        │
-                          └───────────────────────────┘
+```mermaid
+flowchart LR
+  subgraph Mobile["React Native / Expo SDK 54"]
+    UI["Screens · Reanimated v4 · FlashList v2"]
+    AuthCtx["AuthContext · ThemeContext · ToastContext"]
+    APIClient["utils/api.ts"]
+    SBClient["@supabase/supabase-js"]
+    Notif["expo-notifications"]
+  end
+
+  subgraph Vercel["Vercel Serverless (Express)"]
+    API["/auth · /profiles · /requests · /donations · /chat · /admin"]
+    Cron["Vercel Cron · escalation · expiry · cleanup"]
+  end
+
+  subgraph Supabase["Supabase"]
+    PG[("Postgres · RLS · RPCs")]
+    RT["Realtime · postgres_changes"]
+    Auth["Auth · OTP email"]
+  end
+
+  subgraph Push["Push"]
+    Expo["Expo Push API"]
+    APNs["APNs"]
+    FCM["FCM"]
+  end
+
+  UI --> AuthCtx --> APIClient
+  UI --> SBClient
+  APIClient -- "HTTPS · Bearer token" --> API
+  SBClient -- "Realtime WS" --> RT
+  SBClient -- "Auth" --> Auth
+  API -- "service_role" --> PG
+  Cron -- "/internal/cron" --> API
+  API -- "send push" --> Expo
+  Expo --> APNs
+  Expo --> FCM
+  Expo -- "delivered" --> Notif
+  Notif --> UI
 ```
 
-**Request lifecycle:**
-1. Recipient posts a blood request via the mobile app → hits `POST /api/v1/requests`.
-2. Backend saves the request, then immediately fires `startGeoFencing()` in the background.
-3. Geo-fencing service queries all eligible donors, filters by radius ring, and dispatches push notifications via Expo Push Service in batches of 50.
-4. Each notified donor appears in `request_responses` with status `pending`.
-5. A donor taps the notification, reviews the request, and calls `POST /api/v1/donations/accept`.
-6. The geo-fencing expansion is cancelled, the recipient receives a push notification, and both parties can open an in-app real-time chat.
-7. Once the donation happens at the hospital, the recipient calls `POST /api/v1/donations/complete`, which increments `total_donations` and records `last_donation_date` on the donor's profile.
+### Single-source-of-truth contracts
+
+- **`supabase_schema.sql`** — the only schema file. Tables, enums, RLS, RPCs, grants, realtime publication.
+- **`AuthContext`** — the only place the app reads `profile` from. Updates merge the server-returned row (the backend may normalise — e.g., role downgrade on age fail — so the server response is canonical).
+- **`ThemeContext`** — tri-state (system/dark/light) with `Appearance.addChangeListener` subscription + dark default fallback (Expo Go Android limitation workaround).
+- **`utils/api.ts`** — every HTTP call. Backend errors surface as typed `ApiError` discriminated by `isApiError`.
 
 ---
 
-## Tech Stack
+## Tech stack
 
-### Backend
-
-| Layer | Technology |
-|---|---|
-| Runtime | Node.js ≥ 20 |
-| Framework | Express 4 |
-| Database client | `@supabase/supabase-js` v2 (service role) |
-| Auth | Supabase Auth (JWT verification via `auth.getUser`) |
-| Push notifications | `expo-server-sdk` |
-| Validation | `express-validator` |
-| Security | `helmet`, `cors`, `express-rate-limit` |
-| Logging | `morgan` |
-| Scheduling | `node-cron` |
-| Deployment | Railway (Nixpacks, `railway.json`) |
-
-### Mobile
-
-| Layer | Technology |
-|---|---|
-| Framework | React Native 0.81.5 |
-| Toolchain | Expo SDK 54 |
-| Navigation | Expo Router 6 (file-based) + React Navigation |
-| Database / Realtime | `@supabase/supabase-js` v2 (anon key + RLS) |
-| Maps | `react-native-maps` |
-| Notifications | `expo-notifications` + `expo-task-manager` |
-| Location | `expo-location` |
-| Animations | `react-native-reanimated` 4 |
-| Lists | `@shopify/flash-list` |
-| Storage | `expo-secure-store`, `@react-native-async-storage/async-storage` |
-| Language | TypeScript 5.9 |
+| Layer | Choice | Why |
+|---|---|---|
+| Mobile framework | **Expo SDK 54** + RN 0.81.5 + React 19.1 | New Architecture default, first-class Reanimated v4, FlashList v2, `expo-glass-effect`. |
+| Language | **TypeScript (strict)** | Catches every shape mismatch at compile time. |
+| Navigation | **Expo Router v6** | File-based, typed routes, group-aware guards via `<Stack.Protected>` semantics. |
+| State | **React Context** (Auth, Theme, Toast) | Three contexts for an app this size; deliberately not Zustand (see `REDESIGN_PLAN.md` §13). |
+| Server cache | **Direct fetch + Supabase Realtime** | Realtime is the cache-invalidation mechanism. TanStack Query intentionally not added. |
+| Animations | **Reanimated v4 worklets** | UI-thread 120 FPS target. Spring/timing/sequence/repeat — every interactive animation. |
+| Lists | **`@shopify/flash-list` v2** | `maintainVisibleContentPosition.startRenderingFromBottom` for chat; recycler for feeds. |
+| Storage | **`@react-native-async-storage/async-storage`** + **`expo-secure-store`** | Never MMKV. Sensitive tokens go through SecureStore. |
+| Images | **`expo-image`** with cache policy | Disk + memory cache, modern formats, faster than RN's `Image`. |
+| Maps | **`react-native-maps`** | Default provider with theme switching. |
+| Backend | **Node 20 + Express** on **Vercel Serverless** | Stateless functions, free tier-friendly, sub-100 ms cold starts in regions. |
+| Database | **Supabase Postgres** with RLS | Realtime subscriptions on `postgres_changes`. Atomic RPCs for accept/complete. |
+| Auth | **Supabase Auth · email OTP** | No passwords. 6-digit code per session. |
+| Notifications | **`expo-notifications`** + Expo Push API | Killed-state delivery; per-OEM channels for Android (see `PUSH_NOTIFICATIONS.md`). |
+| Geo | **Haversine + `deltaFromKm`** + reverse-geocode via `expo-location` | All radius math in-app; reverse geocode hits the OS. |
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
-root/
-├── backend/
+BludStack/
+├── mobile/                     # Expo SDK 54 app
+│   ├── app/
+│   │   ├── _layout.tsx         # ErrorBoundary > GH > KeyboardProvider > SafeArea > Theme > Auth > Toast > RootNavigator
+│   │   ├── index.tsx           # Cold-start gate (<Redirect>)
+│   │   ├── (auth)/             # OTP sign-in (sheet UI + accent strip + handle)
+│   │   ├── onboarding.tsx      # Multi-step profile setup (sheet pattern)
+│   │   ├── (tabs)/
+│   │   │   ├── index.tsx           # Donor home — FlashList, memoized renderItem
+│   │   │   ├── request.tsx         # Recipient post-request — Uber DECIDE/VERIFY/ACT
+│   │   │   ├── donors.tsx          # Discovery — list + map toggle, filter chips
+│   │   │   ├── my-requests.tsx     # Recipient's own requests
+│   │   │   ├── history.tsx         # Donor donation timeline
+│   │   │   └── profile.tsx         # Profile + settings
+│   │   ├── request/[id].tsx    # Request detail — live donor heartbeat
+│   │   ├── donor/[id].tsx      # Donor detail — compatibility + contact pills
+│   │   ├── map/live.tsx        # Live tracking map
+│   │   ├── chat.tsx            # Donor ↔ recipient chat (FlashList v2 inverted)
+│   │   └── profile/edit.tsx    # Edit profile modal
+│   ├── components/             # Theme-tokenised primitives
+│   ├── contexts/               # Auth · Theme · Toast
+│   ├── hooks/                  # Requests · location · notifications · heartbeat · chat
+│   ├── utils/                  # api.ts · supabase.ts · geo.ts · helpers.ts
+│   ├── constants/              # Colors · Typography · BloodData
+│   └── lib/errorReporter.ts    # Typed logger wrapper — NEVER Sentry
+├── backend/                    # Express on Vercel
 │   ├── src/
-│   │   ├── controllers/
-│   │   │   ├── authController.js         # GET /me, POST /register, POST /logout
-│   │   │   ├── donationController.js     # accept, decline, complete, history
-│   │   │   ├── notificationController.js # register token, remove token, test
-│   │   │   ├── profileController.js      # get profile, update, location, nearby donors
-│   │   │   ├── requestController.js      # CRUD for blood requests
-│   │   │   └── statsController.js        # community stats, leaderboard, blood availability
-│   │   ├── middleware/
-│   │   │   ├── auth.js                   # requireAuth / optionalAuth (JWT via Supabase)
-│   │   │   ├── errorHandler.js           # global Express error handler
-│   │   │   ├── rateLimiter.js            # global + auth + notification limiters
-│   │   │   ├── requestLogger.js          # attaches requestId to each request
-│   │   │   └── validate.js              # express-validator result check
-│   │   ├── routes/
-│   │   │   ├── auth.js                   # /api/v1/auth/*
-│   │   │   ├── donations.js              # /api/v1/donations/*
-│   │   │   ├── notifications.js          # /api/v1/notifications/*
-│   │   │   ├── profiles.js              # /api/v1/profiles/*
-│   │   │   ├── requests.js              # /api/v1/requests/*
-│   │   │   └── stats.js                  # /api/v1/stats/*
-│   │   ├── services/
-│   │   │   ├── cronService.js            # scheduled jobs (expire requests, clean tokens)
-│   │   │   ├── geoFencingService.js      # ring-by-ring donor notification engine
-│   │   │   └── notificationService.js    # Expo push notification helpers
-│   │   ├── utils/
-│   │   │   ├── geo.js                    # haversine distance, radius filter, blood compat
-│   │   │   ├── response.js               # success/error response helpers
-│   │   │   └── supabaseAdmin.js          # Supabase service-role client singleton
-│   │   └── server.js                     # Express app bootstrap
-│   ├── .env.example
-│   ├── package.json
-│   └── railway.json
-│
-└── mobile/
-    ├── app/
-    │   ├── _layout.tsx                   # Root navigator, auth guard, splash screen
-    │   ├── (auth)/
-    │   │   ├── _layout.tsx               # Auth stack layout
-    │   │   └── index.tsx                 # OTP login / sign-up screen
-    │   ├── (tabs)/
-    │   │   ├── _layout.tsx               # Bottom tab bar
-    │   │   ├── index.tsx                 # Home — compatible active requests feed
-    │   │   ├── donors.tsx                # Nearby donors map/list
-    │   │   ├── history.tsx               # Donation history
-    │   │   ├── my-requests.tsx           # Recipient's own requests
-    │   │   ├── profile.tsx               # User profile + settings
-    │   │   └── request.tsx               # Post a new blood request
-    │   ├── donor/[id].tsx                # Donor profile modal
-    │   ├── map/live.tsx                  # Live map (donor ↔ hospital tracking)
-    │   ├── onboarding.tsx                # First-time profile setup
-    │   ├── request/[id].tsx              # Blood request detail modal
-    │   └── chat.tsx                      # Real-time donor ↔ recipient messaging
-    ├── components/
-    │   ├── BloodGroupBadge.tsx
-    │   ├── Button.tsx
-    │   ├── Card.tsx
-    │   ├── CustomAlert.tsx
-    │   ├── EmptyState.tsx
-    │   ├── Input.tsx
-    │   ├── LoadingScreen.tsx
-    │   ├── ProfileCard.tsx
-    │   ├── PressableScale.tsx
-    │   ├── RequestCard.tsx
-    │   ├── ScreenHeader.tsx
-    │   ├── SelectSheet.tsx
-    │   ├── StatsBanner.tsx
-    │   ├── ToggleSwitch.tsx
-    │   └── UrgencyBanner.tsx
-    ├── constants/
-    │   ├── BloodData.ts                  # Blood groups, compatibility map, geo config
-    │   ├── Colors.ts                     # Design system (dark/light palette)
-    │   ├── Typography.ts                 # Font sizes, weights, spacing
-    │   └── theme.ts                      # Theme tokens
-    ├── contexts/
-    │   ├── AuthContext.tsx               # Session, profile, realtime subscription
-    │   └── ThemeContext.tsx              # Dark/light mode toggle
-    ├── hooks/
-    │   ├── useLocation.ts                # GPS location with background tracking
-    │   ├── useNotifications.ts           # Expo push token registration
-    │   └── useRequests.ts                # Blood request CRUD + realtime updates
-    └── package.json
+│   │   ├── controllers/        # auth · profile · request · donation · chat · stats · admin
+│   │   ├── middleware/         # auth · errorHandler · validator
+│   │   ├── routes/             # Express routers per resource
+│   │   ├── utils/supabaseAdmin.js   # service_role client
+│   │   └── server.js
+│   └── vercel.json             # Function + cron config
+├── supabase_schema.sql         # Single source of truth — tables, RLS, RPCs, grants
+├── migrations/                 # Delta files for non-destructive Studio runs
+├── verify_schema.sql           # Single-row PASS/FAIL diagnostic
+├── PUSH_NOTIFICATIONS.md       # Killed-state delivery playbook
+├── REDESIGN_PLAN.md            # Canonical design language + 100%-wired mandate
+└── HARDENING_NOTES.md          # 28-flaw fix log
 ```
 
 ---
 
-## Features
+## The N-donors rule
 
-### For Donors
-- **Compatible request feed** — Home screen shows only blood requests that match the donor's blood group (based on full compatibility table, not just exact match).
-- **One-tap accept** — Accept a request directly from the feed or the detail modal. Includes a 90-day cooldown guard enforced both client-side and server-side.
-- **Live map** — After accepting, both donor and recipient see each other's location on a live map with a drawn polyline route and estimated drive time.
-- **In-app chat** — Real-time messaging between donor and recipient tied to a specific request (Supabase Realtime).
-- **Donation history** — Full log of accepted, completed, and declined requests.
-- **Availability toggle** — Donors can pause their availability at any time from the profile screen.
+A request for **N units** of blood needs **N distinct donors** to accept and complete. One donor per unit. No exceptions.
 
-### For Recipients
-- **Post a blood request** — Specify blood group, urgency level (critical / urgent / standard), hospital name and address, GPS coordinates, units needed, and optional notes.
-- **Urgency levels:**
-  - 🚨 **Critical** — expires after 2 hours
-  - ⚠️ **Urgent** — expires after 6 hours
-  - 🩸 **Standard** — expires after 24 hours
-- **Manage requests** — View, cancel, or mark requests as fulfilled from the My Requests tab.
-- **Mark donation complete** — Once the donor arrives and donates, the recipient confirms completion, which updates the donor's total donation count and last donation date.
-- **Donor profiles** — View a responding donor's blood group, total donations, verification status, and (optionally) shared medical history.
+```mermaid
+flowchart TD
+  A["Recipient posts: 5 units AB+"] --> B["Geo-fence escalation begins"]
+  B --> C{"5 donors accepted?"}
+  C -- No --> D["Push to next ring"]
+  D --> B
+  C -- Yes --> E["Request stays 'active' until ALL 5 complete"]
+  E --> F["Donor 1..5 mark 'arrived & donated'"]
+  F --> G["complete_blood_donation RPC<br/>increments total_donations<br/>+ sets last_donation_date<br/>+ checks fulfillment"]
+  G --> H{"All N donors completed?"}
+  H -- No --> E
+  H -- Yes --> I["Request → 'fulfilled'<br/>Recipient + donors notified"]
+```
 
-### Community
-- **Nearby donors map** — See available donors near any location, filterable by blood group and radius.
-- **Community stats** — Total donors, total donations, active requests across the platform.
-- **Leaderboard** — Top donors ranked by total donations.
-- **Blood availability** — Count of available donors per blood group.
+The `complete_blood_donation` RPC enforces this atomically. A 5th donor cannot "complete" what the 1st through 4th haven't already donated against. There is no path to mark a request fulfilled while units remain.
 
 ---
 
-## Geo-Fencing Algorithm
+## Geo-fence escalation algorithm
 
-When a blood request is posted, `startGeoFencing()` runs asynchronously and expands outward in concentric rings:
-
+```mermaid
+flowchart LR
+  Start(["Request posted"]) --> R1["Ring 1 km · ~30 s"]
+  R1 -- "no accept" --> R2["Ring 5 km · ~60 s"]
+  R2 -- "no accept" --> R3["Ring 15 km · ~90 s"]
+  R3 -- "no accept" --> R4["Ring 30 km · ~2 min"]
+  R4 -- "no accept" --> R5["Ring 50 km · ~3 min"]
+  R5 -- "no accept" --> Country["Country-wide"]
+  R1 -- "accept" --> Heart["Live heartbeat starts"]
+  R2 -- "accept" --> Heart
+  R3 -- "accept" --> Heart
+  R4 -- "accept" --> Heart
+  R5 -- "accept" --> Heart
+  Country -- "accept" --> Heart
 ```
-Ring 0:  1 km  → immediate (notification on request creation)
-Ring 1:  5 km  → +30 seconds
-Ring 2: 15 km  → +60 seconds
-Ring 3: 30 km  → +90 seconds
-Ring 4: 50 km  → +120 seconds
-Fallback: country-wide (same country bounding box, never cross-border)
-```
 
-The delay between rings is configurable via `GEO_EXPANSION_DELAY_SECONDS` (default: 30 s).
+At each ring, the backend:
+1. Calls `nearby_compatible_donors(req_id, radius_km)` — a Postgres function that filters by compatibility matrix, eligibility (age, cooldown, availability), and `ST_DWithin` on the location.
+2. Sends Expo Push to the cohort.
+3. Records ring + cohort size in `request_escalations` for the analytics + cron timing decisions.
+4. Holds the ring for the configured TTL or until N donors accept.
 
-**Eligibility criteria for a donor to be notified:**
-- `is_available_to_donate = true`
-- Blood group is compatible with the request's required group
-- Has a valid Expo push token
-- Has known GPS coordinates
-- Last donated more than 90 days ago (or never donated)
-
-**De-duplication:** A `Set<donorId>` (`notifiedIds`) ensures each donor is only notified once across all rings.
-
-**Country-wide fallback:** If no donor accepts after all 5 rings are exhausted, the system searches within the request's country (detected from bounding boxes: PK, IN, BD, US, GB, SA, AE, NG, EG, ZA). Cross-border donors are never included.
-
-**Cancellation:** Geo-fencing stops immediately when:
-- A donor accepts the request (`cancelGeoFencing(requestId)` called in `acceptRequest`)
-- The recipient cancels the request
-- The request expires via the cron job
-
-In a multi-instance deployment, `activeJobs` (currently an in-process `Map`) should be replaced with Redis pub/sub.
+The geo-fence claim is **DB-persisted with compare-and-set (CAS)** semantics — two cron invocations or two cohorts cannot double-page the same ring.
 
 ---
 
-## Blood Compatibility Logic
+## Blood compatibility matrix
 
-The platform uses the standard ABO/Rh compatibility table:
-
-| Recipient | Compatible Donors |
+| Recipient | Can receive from |
 |---|---|
-| A+ | A+, A−, O+, O− |
-| A− | A−, O− |
-| B+ | B+, B−, O+, O− |
-| B− | B−, O− |
-| AB+ | All blood groups (universal recipient) |
-| AB− | A−, B−, AB−, O− |
-| O+ | O+, O− |
-| O− | O− only (universal donor) |
+| **O−** | O− |
+| **O+** | O−, O+ |
+| **A−** | O−, A− |
+| **A+** | O−, O+, A−, A+ |
+| **B−** | O−, B− |
+| **B+** | O−, O+, B−, B+ |
+| **AB−** | O−, A−, B−, AB− |
+| **AB+** | All groups (universal recipient) |
 
-This table is defined identically in both `backend/src/utils/geo.js` (`DONOR_FOR_RECIPIENT`) and `mobile/constants/BloodData.ts` (`DONOR_FOR_RECIPIENT`) to keep client and server in sync.
-
----
-
-## API Reference
-
-All endpoints are prefixed with `/api/v1`. Every protected endpoint requires a `Bearer <supabase_jwt>` token in the `Authorization` header.
-
-### Health
-
-```
-GET  /health
-```
-Returns service name, version, uptime, and timestamp. No auth required.
+`DONOR_FOR_RECIPIENT` in `constants/BloodData.ts` is the canonical mapping. The backend filters by this matrix server-side; the client filters the home feed defensively.
 
 ---
 
-### Auth — `/api/v1/auth`
+## Design system
 
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/me` | ✅ | Get the authenticated user's profile |
-| POST | `/register` | ✅ | Complete first-time profile setup after OTP |
-| POST | `/logout` | ✅ | Clear push token and invalidate session |
+The **`(tabs)/request.tsx`** screen is the locked design reference. Every other screen mirrors its pattern. The full spec lives in `REDESIGN_PLAN.md` §14, but the headline rules are:
 
-**POST `/register` body:**
-```json
-{
-  "full_name": "string (2–80 chars, required)",
-  "blood_group": "A+|A-|B+|B-|AB+|AB-|O+|O- (required)",
-  "gender": "string (optional, max 40)",
-  "date_of_birth": "ISO date string (optional)",
-  "medical_conditions": ["string"] "(optional array)",
-  "share_medical_history": "boolean (default: false)",
-  "is_available_to_donate": "boolean (default: true)"
-}
-```
+- **Sheet language** — bottom sheet ascends with `-Spacing[5]` overlap; brand accent strip (3 px crimson) + handle on top; spring entrance from `translateY 60`.
+- **Section labels** — uppercase, `FontWeight.black`, `LetterSpacing.widest`, `theme.textMuted`, indented `Spacing[2]`. Questions, not nouns.
+- **Inline CTA at form end** — summary row (colored dot + bold tier label + bullet-separated facts) + pill button + footer micro-copy (privacy/reassurance).
+- **Breathing animation** on critical/destructive CTAs (1.00 ↔ 1.02, 1500 ms infinite). Loss aversion via motion.
+- **Haptics on every Pressable** — `Haptics.selectionAsync()` for toggles, `Haptics.impactAsync(Medium)` for commits.
+- **Theme tokens only** — `theme.primary`, `theme.success`, `theme.warning`, `theme.danger`, `theme.surface`, `theme.cardElevated`, `theme.background`, `theme.border`, `theme.borderStrong`, `theme.textPrimary`, `theme.textMuted`, `theme.textTertiary`, `theme.textOnPrimary`. Never hardcoded hex.
+- **Pill-shaped 2026 visual** — `Radius.pill` for actions and chips, `Radius.xl` for cards, `Radius['2xl']` for sheet tops.
+- **Skeleton loading only** — `Skeleton` shimmer matching content geometry. Never `ActivityIndicator`.
 
 ---
 
-### Profiles — `/api/v1/profiles`
+## Performance budget
 
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/nearby-donors` | ✅ | List available donors within radius |
-| PATCH | `/me` | ✅ | Update own profile fields |
-| PATCH | `/me/location` | ✅ | Update GPS coordinates |
-| GET | `/:id` | ✅ | Get any user's public profile |
-
-**GET `/nearby-donors` query params:**
-```
-lat        float  required  -90 to 90
-lon        float  required  -180 to 180
-radiusKm   float  optional  1–200 (default: 50)
-bloodGroup string optional  one of the 8 blood groups
-```
-
----
-
-### Requests — `/api/v1/requests`
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/my` | ✅ | List the authenticated user's own requests |
-| GET | `/` | ✅ | List active requests (filterable) |
-| POST | `/` | ✅ | Create a new blood request |
-| GET | `/:id` | ✅ | Get request detail with responses |
-| PATCH | `/:id/status` | ✅ | Update status (cancelled / fulfilled) |
-| DELETE | `/:id` | ✅ | Hard-delete a cancelled or expired request |
-
-**POST `/` body:**
-```json
-{
-  "blood_group": "A+ (required)",
-  "urgency": "critical|urgent|standard (default: urgent)",
-  "units_needed": "integer 1–20 (default: 1)",
-  "hospital_name": "string 2–200 chars (required)",
-  "hospital_address": "string 5–400 chars (required)",
-  "latitude": "float -90 to 90 (required)",
-  "longitude": "float -180 to 180 (required)",
-  "notes": "string max 1000 chars (optional)"
-}
-```
-
-**GET `/` query params:**
-```
-lat        float  optional  Filter by proximity
-lon        float  optional  Filter by proximity
-radiusKm   float  optional  1–200 (default: 50)
-bloodGroup string optional
-urgency    string optional  critical|urgent|standard
-page       int    optional  default: 1
-limit      int    optional  1–50 (default: 20)
-```
-
----
-
-### Donations — `/api/v1/donations`
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/history` | ✅ | Donor's donation history |
-| POST | `/accept` | ✅ | Donor accepts a request |
-| POST | `/decline` | ✅ | Donor declines a request |
-| POST | `/complete` | ✅ | Recipient marks a donation complete |
-
-**POST `/accept` body:**
-```json
-{ "requestId": "uuid" }
-```
-
-**POST `/complete` body:**
-```json
-{
-  "requestId": "uuid",
-  "donorId": "uuid"
-}
-```
-
-Validations enforced by `acceptRequest`:
-- Request must exist and have `status = 'active'`
-- Donor cannot donate to their own request
-- Donor must not have donated in the last 90 days
-- Donor cannot accept the same request twice
-- The request must not already have enough accepted donors (`units_needed` cap)
-
----
-
-### Notifications — `/api/v1/notifications`
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| PUT | `/token` | ✅ | Register or update Expo push token |
-| DELETE | `/token` | ✅ | Remove push token (on logout) |
-| POST | `/test` | ✅ | Send a test push notification to self |
-
----
-
-### Stats — `/api/v1/stats`
-
-All stats endpoints are public (no auth required, optional auth for future personalisation).
-
-| Method | Path | Description |
+| Metric | Target | How we hit it |
 |---|---|---|
-| GET | `/community` | Total donors, donations, active requests |
-| GET | `/leaderboard` | Top donors by total_donations |
-| GET | `/blood-availability` | Available donor count per blood group |
+| Frame rate on mid-tier Android | **120 FPS** | Reanimated v4 worklets on UI thread; every animation uses `useSharedValue` + `useAnimatedStyle`. |
+| Cold start | < 2 s to first paint | Splash screen until `AuthContext` resolves; `app/index.tsx` redirect gate prevents wrong-default-screen flash. |
+| List scroll | 0 dropped frames | FlashList v2 with `getItemType`, memoized `renderItem`, stable `keyExtractor`. |
+| Map | 60 FPS pan/zoom | `react-native-maps` with `provider={PROVIDER_DEFAULT}`, marker count capped per ring. |
+| Realtime reconnect | < 5 s | Supabase client default retry; channels named uniquely with `uniqueChannelName(prefix)` to avoid collision on rapid re-mount. |
+| Image cache hit | > 90% | `expo-image` with `cachePolicy="memory-disk"`. |
 
 ---
 
-## Database Schema
+## Security model
 
-BludStack uses Supabase (PostgreSQL) with the following core tables:
-
-### `profiles`
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid (PK) | Matches `auth.users.id` |
-| `email` | text | |
-| `full_name` | text | |
-| `phone` | text | |
-| `whatsapp_available` | boolean | |
-| `blood_group` | text | A+, A−, B+, B−, AB+, AB−, O+, O− |
-| `gender` | text | |
-| `date_of_birth` | date | |
-| `avatar_url` | text | |
-| `role` | text | donor / recipient / both |
-| `is_available_to_donate` | boolean | |
-| `last_donation_date` | timestamptz | |
-| `total_donations` | integer | |
-| `is_verified` | boolean | |
-| `latitude` | float8 | |
-| `longitude` | float8 | |
-| `address` | text | |
-| `medical_conditions` | text[] | |
-| `share_medical_history` | boolean | |
-| `push_token` | text | Expo push token |
-| `created_at` | timestamptz | |
-
-### `blood_requests`
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid (PK) | |
-| `recipient_id` | uuid (FK → profiles) | |
-| `blood_group` | text | |
-| `urgency` | text | critical / urgent / standard |
-| `units_needed` | integer | |
-| `hospital_name` | text | |
-| `hospital_address` | text | |
-| `latitude` | float8 | |
-| `longitude` | float8 | |
-| `notes` | text | |
-| `status` | text | active / fulfilled / cancelled / expired |
-| `created_at` | timestamptz | |
-| `updated_at` | timestamptz | |
-| `fulfilled_at` | timestamptz | |
-
-### `request_responses`
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid (PK) | |
-| `request_id` | uuid (FK → blood_requests) | |
-| `donor_id` | uuid (FK → profiles) | |
-| `status` | text | pending / accepted / declined / completed |
-| `created_at` | timestamptz | |
-| Unique constraint | `(request_id, donor_id)` | one response per donor per request |
-
-### `messages`
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid (PK) | |
-| `sender_id` | uuid (FK → profiles) | |
-| `receiver_id` | uuid (FK → profiles) | |
-| `request_id` | uuid (FK → blood_requests) | |
-| `content` | text | |
-| `read` | boolean | |
-| `created_at` | timestamptz | |
+- **Row-level security** on every table. Service role is the only path to bypass — and it's only used inside SECURITY DEFINER RPCs and the backend `supabaseAdmin` client.
+- **Trigger guards** on `profiles` allow the service role to update server-managed fields (`total_donations`, `last_donation_date`, `is_verified`, `push_token`) while blocking client-side writes. The trigger checks `current_user`, `current_role`, and the JWT's `request.jwt.claim.role` OR'd together — robust across PostgREST configurations.
+- **Allowed-fields filter** in `profileController.js` — clients can only PATCH a whitelist. Server-managed fields are stripped server-side regardless of what the client sends.
+- **Atomic RPCs** for accept and complete — capacity, cooldown, age, and idempotency are checked inside the transaction. Failures roll back cleanly.
+- **JWT bearer auth** on every API endpoint. The backend reads `Authorization: Bearer <token>` and verifies against Supabase Auth before any work.
+- **No service-role key in the client.** The mobile app only knows the anon key. Service-role lives in `backend/.env` and Vercel env vars.
+- **OTP rate-limiting** via Supabase Auth defaults. No client-side bypass.
+- **No PII in logs.** `errorReporter` redacts email/phone/coordinates by default.
 
 ---
 
-## Backend Setup
-
-### Prerequisites
-- Node.js ≥ 20
-- A Supabase project with the schema above applied
-
-### Installation
+## Backend setup
 
 ```bash
-cd backend
+# Clone
+git clone https://github.com/aashir-athar/BludStack.git
+cd BludStack/backend
+
+# Install
 npm install
-```
 
-### Configuration
-
-```bash
+# Configure
 cp .env.example .env
-# Fill in SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
-```
+# Fill in: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET, EXPO_ACCESS_TOKEN
 
-### Running Locally
+# Run the schema (single source of truth)
+psql $SUPABASE_DB_URL < ../supabase_schema.sql
 
-```bash
-# Development (with auto-reload)
+# (Optional) Verify the schema is fully applied
+psql $SUPABASE_DB_URL < ../verify_schema.sql
+
+# Dev
 npm run dev
 
-# Production
-npm start
+# Production (Vercel)
+vercel --prod
 ```
-
-The server starts on `http://localhost:4000` by default. Visit `http://localhost:4000/health` to confirm it's running.
 
 ---
 
-## Mobile App Setup
-
-### Prerequisites
-- Node.js ≥ 18
-- Expo CLI (`npm install -g expo-cli`) or use `npx expo`
-- iOS: Xcode 15+ / macOS
-- Android: Android Studio with an emulator, or a physical device
-
-### Installation
+## Mobile setup
 
 ```bash
-cd mobile
+cd BludStack/mobile
+
+# Install
 npm install
+
+# Configure
+cp .env.example .env
+# Fill in: EXPO_PUBLIC_API_URL, EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_ANON_KEY
+
+# Dev (Expo Go for quick iteration; dev build for push notifications)
+npx expo start
+
+# Dev build (required for push, recommended for everything else)
+npx eas build --profile development --platform android
+npx eas build --profile development --platform ios
+
+# Production build
+npx eas build --profile production --platform all
 ```
 
-### Configuration
-
-Create a `.env` file (or set environment variables) in the `mobile/` directory:
-
-```env
-EXPO_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
-EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
-EXPO_PUBLIC_API_URL=http://localhost:4000
-```
-
-> ⚠️ Never use the Supabase service role key in the mobile app. Always use the anon key with RLS.
-
-### Running
-
-```bash
-# Start Expo dev server
-npm start
-
-# Open on iOS simulator
-npm run ios
-
-# Open on Android emulator
-npm run android
-
-# Open in browser (limited functionality)
-npm run web
-```
-
-### Push Notifications
-
-Push notifications use Expo's push service. To receive notifications on a physical device:
-1. Build a development client: `npx expo run:ios` or `npx expo run:android`
-2. The app registers for push permissions on first launch and saves the Expo push token to the backend via `PUT /api/v1/notifications/token`.
-
-> Push notifications do **not** work in the Expo Go app for background delivery. A development build or production build is required.
+> **Heads-up:** push notifications **will not** be delivered to Expo Go on Android since SDK 53. Build a development client to test pushes.
 
 ---
 
-## Environment Variables
+## Environment variables
 
-### Backend (`.env`)
+### Backend (`backend/.env`)
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `PORT` | No | `4000` | HTTP port |
-| `NODE_ENV` | No | `development` | `development` or `production` |
-| `SUPABASE_URL` | **Yes** | — | Your Supabase project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Yes** | — | Service role key (never expose publicly) |
-| `ALLOWED_ORIGINS` | No | `*` | Comma-separated CORS origins |
-| `RATE_LIMIT_WINDOW_MS` | No | `900000` | Rate limit window (15 min) |
-| `RATE_LIMIT_MAX` | No | `100` | Max requests per window |
-| `GEO_EXPANSION_DELAY_SECONDS` | No | `30` | Seconds between geo-fence ring expansions |
+| Key | Where to find it |
+|---|---|
+| `SUPABASE_URL` | Supabase Project Settings → API |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase Project Settings → API (server-side only) |
+| `SUPABASE_DB_URL` | Project Settings → Database → Connection string (used for psql) |
+| `JWT_SECRET` | Same value as Supabase JWT secret |
+| `EXPO_ACCESS_TOKEN` | Expo dashboard → Access Tokens (for push) |
+| `INTERNAL_CRON_TOKEN` | Random secret — used by Vercel Cron to call `/internal/*` |
+| `DEBUG_ERRORS` | `1` to surface pg codes in error responses; `0` in prod |
 
-### Mobile (`.env`)
+### Mobile (`mobile/.env`)
 
-| Variable | Required | Description |
-|---|---|---|
-| `EXPO_PUBLIC_SUPABASE_URL` | **Yes** | Supabase project URL |
-| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | **Yes** | Supabase anon key |
-| `EXPO_PUBLIC_API_URL` | **Yes** | Backend API base URL |
+| Key | Where to find it |
+|---|---|
+| `EXPO_PUBLIC_API_URL` | Your Vercel deployment URL (e.g. `https://bludstack.vercel.app`) |
+| `EXPO_PUBLIC_SUPABASE_URL` | Supabase Project Settings → API |
+| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Supabase Project Settings → API (anon, not service role) |
 
 ---
 
 ## Deployment
 
-### Backend — Railway
+The backend ships to **Vercel Serverless**. `vercel.json` declares the function timeout, regional preferences, and the cron schedule. Push to `main` → Vercel builds and promotes automatically.
 
-The backend includes a `railway.json` configuration:
-
-```json
-{
-  "build": { "builder": "NIXPACKS" },
-  "deploy": {
-    "startCommand": "node src/server.js",
-    "healthcheckPath": "/health",
-    "healthcheckTimeout": 10,
-    "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 5
-  }
-}
-```
-
-To deploy:
-1. Push the `backend/` directory to a GitHub repository.
-2. Create a new Railway project and connect the repo.
-3. Add the environment variables in the Railway dashboard.
-4. Railway will auto-deploy on every push to `main`.
-
-### Mobile — Expo EAS Build
-
-```bash
-# Install EAS CLI
-npm install -g eas-cli
-
-# Login
-eas login
-
-# Build for iOS (TestFlight / App Store)
-eas build --platform ios
-
-# Build for Android (Play Store)
-eas build --platform android
-
-# Submit to stores
-eas submit
-```
+The mobile app ships via **EAS Build + EAS Submit**. `eas.json` defines profiles for development, preview, and production. Internal channel updates flow via **EAS Update** (OTA) for non-native changes.
 
 ---
 
-## Cron Jobs
+## Cron jobs
 
-The backend runs three scheduled jobs via `node-cron`:
+Configured in `vercel.json`:
 
-| Job | Schedule | Description |
+| Path | Schedule | Purpose |
 |---|---|---|
-| `expire-stale-requests` | Every 10 minutes | Marks active requests as `expired` based on urgency window (critical: 2h, urgent: 6h, standard: 24h) |
-| `clean-push-tokens` | Sundays at 02:00 UTC | Cleans up invalid/stale Expo push tokens (DeviceNotRegistered are cleaned inline during notification delivery) |
-| `health-log` | Every 5 minutes | Logs active geo-fence job count and heap memory usage |
+| `/internal/cron/escalate` | `* * * * *` (every minute) | Promotes active requests to the next geo-fence ring if their TTL has elapsed. |
+| `/internal/cron/expire`   | `*/5 * * * *` | Flips overdue requests to `expired`; notifies recipients. |
+| `/internal/cron/cleanup`  | `0 3 * * *` (daily 03:00 UTC) | Purges stale `request_responses` in `pending` status older than 7 days. |
+
+Each cron handler authenticates with `INTERNAL_CRON_TOKEN` before doing work.
 
 ---
 
-## Push Notifications
+## Push notifications
 
-The platform sends the following push notifications:
+Killed-state delivery is the most important reliability axis. The full playbook is in **`PUSH_NOTIFICATIONS.md`**, including per-OEM tuning (Xiaomi, OnePlus, Realme, Samsung battery saver / auto-launch / lock-screen permissions).
 
-| Trigger | Recipient | Content |
-|---|---|---|
-| New blood request posted | Nearby compatible donors | Blood group needed, urgency, hospital name, distance |
-| Geo-fence ring expands | Request owner | Searching X km radius |
-| Country-wide fallback activates | Request owner | Nationwide search active |
-| Donor accepts request | Request owner | Donor name and blood group |
-| Donation marked complete | Donor | Congratulations + new total donation count |
-| Test | Self | Test push notification |
-
-Push tokens are managed as follows:
-- Registered on app launch via `PUT /api/v1/notifications/token`.
-- Cleared on logout via `POST /api/v1/auth/logout`.
-- Removed inline when Expo returns `DeviceNotRegistered`.
-- Bulk-cleaned weekly by the cron job.
+Critical-channel highlights:
+- **Android** — dedicated `critical` channel with bypass-DnD, alarm sound, max importance. The app registers it at startup.
+- **iOS** — `critical-alert` entitlement requested at first run.
+- **Tap deep-linking** — `useNotificationDeepLinks` reads `Notifications.useLastNotificationResponse()` in `_layout.tsx` and routes to the right screen even from a cold launch.
 
 ---
 
-## Security
+## API reference
 
-- **Authentication:** All protected routes use `requireAuth` middleware, which calls `supabase.auth.getUser(token)` — tokens are validated by Supabase, not locally.
-- **Rate limiting:** Global limiter (100 req / 15 min per IP), stricter limiter on auth routes, and a separate limiter for test notification spam.
-- **Helmet:** Sets standard security headers (HSTS, X-Frame-Options, X-Content-Type-Options, etc.).
-- **CORS:** Configurable origins; defaults to open (`*`) in development.
-- **Input validation:** All request bodies and query parameters are validated with `express-validator` before reaching controllers.
-- **Medical history privacy:** A donor's `medical_conditions` array is stripped from responses unless `share_medical_history = true`. Donor GPS coordinates are only exposed to the request owner.
-- **Ownership checks:** Status updates and deletions verify `recipient_id === req.userId` before making changes.
-- **Service role key:** Only used server-side in the backend. The mobile app exclusively uses the anon key with Supabase RLS policies.
-- **Body size limit:** `512 KB` on JSON and URL-encoded bodies to prevent payload-based DoS.
+Base URL: `https://<your-vercel-url>` (or `http://localhost:3000` in dev). Every endpoint requires `Authorization: Bearer <supabase access token>` unless noted.
+
+| Method | Path | Body / Query | Returns |
+|---|---|---|---|
+| `POST` | `/profiles/register` | `RegisterPayload` | `{ profile, downgraded? }` |
+| `PATCH`| `/profiles/me` | `Partial<ProfilePatch>` | `UserProfile` |
+| `GET`  | `/profiles/nearby-donors` | `?lat&lon&radiusKm&bloodGroup` | `Donor[]` |
+| `POST` | `/requests` | `CreateRequestPayload` | `BloodRequest` |
+| `GET`  | `/requests/nearby` | `?lat&lon` | `BloodRequest[]` (excludes own) |
+| `GET`  | `/requests/mine` | — | `BloodRequest[]` |
+| `POST` | `/requests/:id/cancel` | — | `BloodRequest` |
+| `POST` | `/donations/accept` | `{ requestId }` | `RequestResponse` |
+| `POST` | `/donations/decline`| `{ requestId }` | `RequestResponse` |
+| `POST` | `/donations/complete`| `{ requestId, donorId }` | `BloodRequest` (status → `fulfilled` when all units complete) |
+| `POST` | `/donations/heartbeat` | `{ requestId, lat, lon }` | `204` |
+| `GET`  | `/stats/me` | — | `{ donations, livesHelped, lastDonatedAt }` |
+| `GET`  | `/chat/:requestId/messages` | `?before&limit` | `ChatMessage[]` |
+| `POST` | `/chat/:requestId/messages` | `{ clientId, receiverId, body }` | `ChatMessage` |
+
+Errors surface as `ApiError` with `code`, `message`, optional `pgCode/pgHint/details` (when `DEBUG_ERRORS=1`).
+
+---
+
+## Database schema
+
+The canonical schema is **`supabase_schema.sql`** at the repo root. Top-level tables:
+
+| Table | Purpose |
+|---|---|
+| `profiles` | One row per user; role, blood group, contact, eligibility metadata |
+| `blood_requests` | Recipient-posted needs; status, urgency, units, lat/lon, hospital |
+| `request_responses` | Donor responses to a request; status, optional `donor_lat/lon/donor_location_updated_at` |
+| `request_escalations` | Geo-fence ring + cohort log per request |
+| `chat_messages` | Donor ↔ recipient thread scoped to `request_id`; idempotent on `client_id` |
+| `push_tokens` | Per-device Expo push tokens |
+
+All tables have RLS policies. The full DDL is generated and version-controlled — drop the file into Supabase Studio's SQL Editor to reset a project.
+
+---
+
+## Roadmap
+
+- [ ] Group requests (multiple recipients on a single thread for ward-level needs)
+- [ ] In-app video consult for critical cases (E2EE via the noble crypto stack)
+- [ ] Donor badges + leaderboards (city-anonymised)
+- [ ] Web companion (Next.js) for hospitals to post on behalf of patients
+- [ ] Multilingual UI (Urdu, Hindi, Arabic, Spanish — full RTL where applicable)
+- [ ] Donor-recipient chat with images + voice notes (`expo-audio`, not `expo-av`)
+- [ ] Apple Vision Pro spatial map view for blood banks (experimental)
+
+---
+
+## FAQ
+
+**Is my data safe?**
+Yes. Every table has row-level security. Recipient phone numbers are never visible to anyone until a donor accepts. No PII in logs. No external error monitoring SDKs.
+
+**What if no donor accepts?**
+The geo-fence keeps expanding to country-wide. The request stays active until you cancel it or all units are fulfilled. You can repost at any time.
+
+**Can I be both a donor and a recipient?**
+Yes — pick "Both" at onboarding. The role gates which tabs you see; "Both" sees everything.
+
+**How is donor eligibility enforced?**
+Age (≥ 18) is server-enforced. The 90-day cooldown is enforced by the `accept_blood_request` RPC. Availability is a profile toggle.
+
+**Why no MMKV?**
+Project decision. `AsyncStorage` covers every use case at our scale, with broader compatibility and zero native-link friction.
+
+**Why no Sentry?**
+Project decision. `errorReporter` keeps logs on-device or routes them to your own server. No third-party data export.
+
+**Why no emojis?**
+Brand decision. We use Ionicons + custom SVG for every symbol. Consistency across themes, locales, and assistive tech is more important than playful glyphs.
+
+**Why is Reanimated v4 the only animation library?**
+UI-thread 120 FPS target. RN's legacy `Animated` runs on JS thread and drops frames under load. Reanimated worklets compile to UI-thread code.
+
+**Can I run BludStack against a different backend?**
+The mobile app only talks to two surfaces: Supabase (RT + Auth + DB) and the Express backend. Swap `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_SUPABASE_URL` and you're good.
+
+**Where do I file bugs / request features?**
+[GitHub Issues](https://github.com/aashir-athar/BludStack/issues) for bugs, [Discussions](https://github.com/aashir-athar/BludStack/discussions) for features and questions.
 
 ---
 
 ## Contributing
 
-1. Fork the repository.
-2. Create a feature branch: `git checkout -b feature/your-feature`.
-3. Commit your changes: `git commit -m 'feat: add your feature'`.
-4. Push to the branch: `git push origin feature/your-feature`.
-5. Open a Pull Request.
+Pull requests are welcome. The bar is high — but the door is open.
 
-Please run `npm run lint` in both `backend/` and `mobile/` before submitting.
+### Ground rules
+
+1. **One branch per change.** Branch names are kebab-case with a prefix: `feat/`, `fix/`, `chore/`, `docs/`, `refactor/`. Date suffix optional.
+2. **No emojis** in code, copy, or commit messages.
+3. **No `Alert.alert`** for errors — use the `useToast` context.
+4. **No `ActivityIndicator`** — use `Skeleton` shaped like the content.
+5. **No hardcoded hex** outside `Colors.ts`. Everything flows through `theme.*` tokens.
+6. **No `react-native-mmkv`.** All persistence is AsyncStorage or `expo-secure-store`.
+7. **No external error monitoring SDKs.**
+8. **Strict TypeScript** — no `any` in new code. Use the SDK's generated types.
+9. **Memoize list cells.** `React.memo`, stable `keyExtractor`, `getItemType` for FlashList.
+10. **Haptic on every interactive `Pressable`.** Selection for toggles, impact for commits.
+11. **Skeleton loading only.** Never spinners.
+12. **`npx expo install <pkg>`** — never edit `package.json` versions by hand.
+
+### Local development
+
+```bash
+# Backend
+cd backend && npm run dev   # nodemon + tsx if added
+
+# Mobile (Expo Go for fast iteration)
+cd mobile && npx expo start
+
+# Mobile (dev build — required for push notifications)
+cd mobile && npx eas build --profile development --platform android
+```
+
+### Pull-request flow
+
+1. Fork → branch → push.
+2. Open PR against `main`. Title format: `feat(scope): short description` (Conventional Commits).
+3. The PR must:
+   - Pass `tsc --noEmit`.
+   - Pass `expo-doctor`.
+   - Have a screenshot or short video for any UI change.
+   - Have a `Test plan` section describing what you exercised.
+4. Reviewers will check against the [Canonical Design Language](#design-system).
+
+### Sponsorship & contact
+
+If BludStack helps someone you love, consider [sponsoring on GitHub](https://github.com/sponsors/aashir-athar) or sharing the app with a hospital near you.
 
 ---
 
 ## License
 
-This project is private. All rights reserved.
+[MIT License](LICENSE) © 2026 Aashir Athar
+
+You are free to use, modify, and distribute this software with attribution. The clinical workflow (atomic accept/complete, age + cooldown enforcement, RLS posture) is intentionally permissive so other lives can be saved with it.
+
+---
+
+## Author
+
+<div align="center">
+
+**Aashir Athar**
+Founder · Engineer · Designer
+
+[GitHub](https://github.com/aashir-athar) · [LinkedIn](https://www.linkedin.com/in/aashir-athar) · [Sponsor](https://github.com/sponsors/aashir-athar)
+
+<br />
+
+*Built in Lahore. For everyone, anywhere.*
+
+</div>

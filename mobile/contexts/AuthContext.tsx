@@ -109,14 +109,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       'full_name', 'gender', 'date_of_birth', 'avatar_url',
       'blood_group', 'medical_conditions', 'share_medical_history',
       'is_available_to_donate', 'address',
+      'phone', 'whatsapp_available', 'role',
     ];
     for (const k of allowed) {
       if (k in updates) (patch as any)[k] = (updates as any)[k];
     }
     if (Object.keys(patch).length === 0) return;
 
-    await apiUpdateProfile(patch);
-    setProfile(prev => (prev ? { ...prev, ...patch } as UserProfile : prev));
+    // Use the server-returned row as the source of truth. The backend may
+    // normalise (e.g. role downgrade on age fail, trimmed strings). Merging
+    // patch into local first prevents flicker if the server response is slow.
+    const updated = await apiUpdateProfile(patch);
+    setProfile(prev => {
+      if (!prev) return prev;
+      const merged: UserProfile = { ...prev, ...(patch as Partial<UserProfile>) };
+      if (updated && typeof updated === 'object') {
+        Object.assign(merged, updated as Partial<UserProfile>);
+      }
+      return merged;
+    });
   }, [session]);
 
   useEffect(() => {

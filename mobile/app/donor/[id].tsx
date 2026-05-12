@@ -9,8 +9,10 @@ import {
     TouchableOpacity, Alert, Linking, Animated,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/utils/supabase';
@@ -60,24 +62,33 @@ interface DonorResponse {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-const URGENCY_COLOR: Record<string, string> = {
-    critical: '#E8002D',
-    urgent: '#F5A623',
-    standard: '#00A651',
+// Tone keys resolved through the theme inside the component (see toneColor()).
+type ToneKey = 'success' | 'warning' | 'danger' | 'muted';
+const URGENCY_TONE: Record<string, ToneKey> = {
+    critical: 'danger',
+    urgent:   'warning',
+    standard: 'success',
 };
 
-const RESPONSE_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-    pending: { label: 'Pending', color: '#F5A623' },
-    accepted: { label: 'Accepted', color: '#00A651' },
-    declined: { label: 'Declined', color: '#9B9B9B' },
-    completed: { label: 'Completed', color: '#00A651' },
+const RESPONSE_STATUS_CONFIG: Record<string, { label: string; tone: ToneKey }> = {
+    pending:   { label: 'Pending',   tone: 'warning' },
+    accepted:  { label: 'Accepted',  tone: 'success' },
+    declined:  { label: 'Declined',  tone: 'muted'   },
+    completed: { label: 'Completed', tone: 'success' },
 };
 
 // ─── Screen ──────────────────────────────────────────────────────────────────
 
 export default function DonorDetailScreen() {
-    const { id } = useLocalSearchParams<{ id: string }>();
+    // Accepts an optional `requestId` query param so the Message button can
+    // open the in-app chat scoped to the right thread when navigated from a
+    // specific request detail screen. When absent, we discover the most
+    // recent accepted/completed response between the viewer and this donor
+    // (or vice-versa) and scope the chat to that request.
+    const { id, requestId: passedRequestId } = useLocalSearchParams<{
+        id: string;
+        requestId?: string;
+    }>();
     const { theme, isDark } = useTheme();
     const { user, profile: myProfile } = useAuth();
     const router = useRouter();
@@ -87,6 +98,11 @@ export default function DonorDetailScreen() {
     const [donor, setDonor] = useState<DonorProfile | null>(null);
     const [responses, setResponses] = useState<DonorResponse[]>([]);
     const [loading, setLoading] = useState(true);
+    // Resolved request_id for the chat thread. Either the one passed via
+    // query param, or discovered from a recent mutual-commitment response.
+    const [chatRequestId, setChatRequestId] = useState<string | null>(
+        passedRequestId ?? null,
+    );
 
     // Subtle entrance animation for the avatar
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -148,6 +164,55 @@ export default function DonorDetailScreen() {
         Promise.all([fetchDonor(), fetchResponses()]).finally(() => setLoading(false));
     }, [id]);
 
+    // Discover a chat thread when no requestId was passed via query param.
+    // Looks for any accepted/completed response between the viewer and the
+    // donor on either side (donor accepted my request, or I accepted theirs)
+    // and uses the most recent one. The mutual-commitment RLS policy makes
+    // this read safe for both parties.
+    useEffect(() => {
+        if (passedRequestId || !user?.id || !id || user.id === id) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                // Path A: this profile is a donor who accepted MY (viewer = recipient's) request
+                const { data: aData } = await supabase
+                    .from('request_responses')
+                    .select('request_id, created_at, blood_requests!inner(recipient_id)')
+                    .eq('donor_id', id)
+                    .in('status', ['accepted', 'completed'])
+                    .eq('blood_requests.recipient_id', user.id)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+
+                if (cancelled) return;
+                if ((aData as any)?.request_id) {
+                    setChatRequestId((aData as any).request_id);
+                    return;
+                }
+
+                // Path B: I (viewer = donor) accepted THIS profile's (recipient's) request
+                const { data: bData } = await supabase
+                    .from('request_responses')
+                    .select('request_id, created_at, blood_requests!inner(recipient_id)')
+                    .eq('donor_id', user.id)
+                    .in('status', ['accepted', 'completed'])
+                    .eq('blood_requests.recipient_id', id)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+
+                if (cancelled) return;
+                if ((bData as any)?.request_id) {
+                    setChatRequestId((bData as any).request_id);
+                }
+            } catch (e: any) {
+                if (!cancelled) console.warn('[DonorDetail chat-thread]', e?.message);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [passedRequestId, user?.id, id]);
+
     // ── Derived values ───────────────────────────────────────────────────────
     const isOwnProfile = user?.id === id;
 
@@ -156,7 +221,7 @@ export default function DonorDetailScreen() {
         : { canDonate: false, daysLeft: 0 };
 
     const available = donor?.is_available_to_donate && canDonate;
-    const statusColor = available ? '#00A651' : '#F5A623';
+    const statusColor = available ? theme.success : theme.warning;
 
     const distance = location && donor?.latitude && donor?.longitude
         ? haversineDistance(location.latitude, location.longitude, donor.latitude, donor.longitude)
@@ -180,16 +245,38 @@ export default function DonorDetailScreen() {
         if (!donor) return;
         const target = donor.phone ?? donor.email;
         if (!target) return Alert.alert('No contact info', 'This donor has not shared contact details.');
+        Haptics.selectionAsync().catch(() => {});
         Linking.openURL(donor.phone ? `tel:${donor.phone}` : `mailto:${donor.email}`);
     }, [donor]);
 
+    // In-app chat — NEVER email. Chat threads are scoped to a request_id so
+    // both parties open the same conversation that lives behind the existing
+    // mutual-commitment RLS. If no chat thread is discoverable, we tell the
+    // user up-front instead of silently opening a broken composer.
     const handleMessage = useCallback(() => {
-        if (!donor?.email) return;
-        Linking.openURL(`mailto:${donor.email}`);
-    }, [donor]);
+        if (!donor || !user?.id) return;
+        if (user.id === donor.id) return; // can't message yourself
+        if (!chatRequestId) {
+            Alert.alert(
+                'No active thread yet',
+                "Chat opens once you've accepted each other through a request. Accept or post one to start a conversation.",
+            );
+            return;
+        }
+        Haptics.selectionAsync().catch(() => {});
+        router.push({
+            pathname: '/chat',
+            params: {
+                requestId:    String(chatRequestId),
+                receiverId:   donor.id,
+                receiverName: encodeURIComponent(donor.full_name ?? 'Donor'),
+            },
+        } as any);
+    }, [donor, user?.id, chatRequestId, router]);
 
     const handleOpenMap = useCallback(() => {
         if (!donor?.latitude || !donor?.longitude) return;
+        Haptics.selectionAsync().catch(() => {});
         Linking.openURL(
             `https://www.google.com/maps/dir/?api=1&destination=${donor.latitude},${donor.longitude}&travelmode=driving`
         );
@@ -205,7 +292,7 @@ export default function DonorDetailScreen() {
 
             {/* ── Top bar ── */}
             <View style={[styles.topBar, {
-                paddingTop: insets.top + Spacing[2],
+                paddingTop: Spacing[2],
                 backgroundColor: theme.surface,
                 borderBottomColor: theme.border,
             }]}>
@@ -254,8 +341,9 @@ export default function DonorDetailScreen() {
                                 {donor.full_name}
                             </Text>
                             {donor.is_verified && (
-                                <View style={[styles.verifiedBadge, { backgroundColor: '#00A65118' }]}>
-                                    <Text style={[styles.verifiedText, { color: '#00A651' }]}>✓ Verified</Text>
+                                <View style={[styles.verifiedBadge, { backgroundColor: theme.successSoft }]}>
+                                    <Ionicons name="checkmark-circle" size={12} color={theme.success} />
+                                    <Text style={[styles.verifiedText, { color: theme.success }]}>Verified</Text>
                                 </View>
                             )}
                         </View>
@@ -270,7 +358,7 @@ export default function DonorDetailScreen() {
 
                         {donor.address && (
                             <Text style={[styles.addressText, { color: theme.textMuted }]} numberOfLines={1}>
-                                📍 {donor.address}
+                                {donor.address}
                             </Text>
                         )}
                     </View>
@@ -315,7 +403,11 @@ export default function DonorDetailScreen() {
                             borderColor: canDonateToMe ? '#00A65130' : '#E8002D25',
                         },
                     ]}>
-                        <Text style={styles.compatIcon}>{canDonateToMe ? '✅' : '⚠️'}</Text>
+                        <Ionicons
+                            name={canDonateToMe ? 'checkmark-circle' : 'warning'}
+                            size={22}
+                            color={canDonateToMe ? theme.success : theme.warning}
+                        />
                         <Text style={[styles.compatText, { color: theme.textSecondary }]}>
                             {canDonateToMe
                                 ? `${donor.blood_group} is compatible with your blood group (${myBloodGroup}). This donor can donate to you.`
@@ -364,14 +456,21 @@ export default function DonorDetailScreen() {
                 {/* ── Donation history (accepted/completed responses) ── */}
                 {responses.length > 0 && (
                     <SectionCard
-                        title={`🩸 DONATION HISTORY  ·  ${responses.length} record${responses.length !== 1 ? 's' : ''}`}
+                        title={`Donation history  ·  ${responses.length} record${responses.length !== 1 ? 's' : ''}`}
                         theme={theme}
                     >
                         {responses.map(resp => {
                             const req = resp.blood_request;
                             if (!req) return null;
-                            const statusCfg = RESPONSE_STATUS_CONFIG[resp.status] ?? { label: resp.status, color: theme.textMuted };
-                            const urgencyColor = URGENCY_COLOR[req.urgency] ?? '#E8002D';
+                            const statusCfg = RESPONSE_STATUS_CONFIG[resp.status] ?? { label: resp.status, tone: 'muted' as const };
+                            const urgencyTone = URGENCY_TONE[req.urgency] ?? 'danger';
+                            const toneColor = (t: ToneKey) =>
+                                t === 'success' ? theme.success
+                                : t === 'warning' ? theme.warning
+                                : t === 'danger'  ? theme.danger
+                                :                   theme.textMuted;
+                            const statusColor  = toneColor(statusCfg.tone);
+                            const urgencyColor = toneColor(urgencyTone);
                             return (
                                 <TouchableOpacity
                                     key={resp.id}
@@ -379,7 +478,7 @@ export default function DonorDetailScreen() {
                                     activeOpacity={0.75}
                                 >
                                     <View style={[styles.historyRow, { backgroundColor: theme.cardElevated, borderColor: theme.border }]}>
-                                        <BloodGroupBadge bloodGroup={req.blood_group} size="sm" inverted />
+                                        <BloodGroupBadge bloodGroup={req.blood_group} size="sm" variant="solid" />
                                         <View style={styles.historyMeta}>
                                             <Text style={[styles.historyHospital, { color: theme.textPrimary }]} numberOfLines={1}>
                                                 {req.hospital_name}
@@ -393,8 +492,8 @@ export default function DonorDetailScreen() {
                                         </View>
                                         <View style={styles.historyRight}>
                                             <View style={[styles.urgencyPip, { backgroundColor: urgencyColor }]} />
-                                            <View style={[styles.statusPill, { backgroundColor: `${statusCfg.color}18`, borderColor: `${statusCfg.color}40` }]}>
-                                                <Text style={[styles.statusPillText, { color: statusCfg.color }]}>
+                                            <View style={[styles.statusPill, { backgroundColor: statusColor + '22', borderColor: statusColor }]}>
+                                                <Text style={[styles.statusPillText, { color: statusColor }]}>
                                                     {statusCfg.label}
                                                 </Text>
                                             </View>
@@ -417,7 +516,8 @@ export default function DonorDetailScreen() {
                 {!isOwnProfile && (
                     <View style={styles.actionWrap}>
                         <Button
-                            label="📞  Call Donor"
+                            label="Call donor"
+                            icon={<Ionicons name="call" size={16} color="#fff" />}
                             variant="primary"
                             size="lg"
                             onPress={handleCall}
@@ -478,7 +578,7 @@ const styles = StyleSheet.create({
 
     // Hero card
     heroCard: {
-        borderRadius: Radius.md, borderWidth: StyleSheet.hairlineWidth,
+        borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth,
         overflow: 'hidden', padding: Spacing[5], gap: Spacing[4],
         alignItems: 'center',
     },
@@ -495,7 +595,7 @@ const styles = StyleSheet.create({
     heroMeta: { alignItems: 'center', gap: Spacing[1] },
     nameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing[2], flexWrap: 'wrap', justifyContent: 'center' },
     heroName: { fontSize: FontSize.lg, fontWeight: FontWeight.black, letterSpacing: LetterSpacing.tight },
-    verifiedBadge: { paddingHorizontal: Spacing[2], paddingVertical: 2, borderRadius: Radius.xs },
+    verifiedBadge: { paddingHorizontal: Spacing[2], paddingVertical: 2, borderRadius: Radius.pill },
     verifiedText: { fontSize: FontSize['2xs'], fontWeight: FontWeight.black, letterSpacing: LetterSpacing.wide },
     availabilityText: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, letterSpacing: LetterSpacing.snug },
     addressText: { fontSize: FontSize.xs },
@@ -515,35 +615,35 @@ const styles = StyleSheet.create({
     // Compatibility banner
     compatBanner: {
         flexDirection: 'row', alignItems: 'flex-start', gap: Spacing[3],
-        padding: Spacing[3], borderRadius: Radius.sm, borderWidth: 1,
+        padding: Spacing[3], borderRadius: Radius.xl, borderWidth: 1,
     },
     compatIcon: { fontSize: 18 },
     compatText: { flex: 1, fontSize: FontSize.sm, lineHeight: 20 },
 
     // ETA card
-    etaCard: { borderRadius: Radius.md, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+    etaCard: { borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
     etaInner: { flexDirection: 'row', alignItems: 'center', gap: Spacing[3], padding: Spacing[4] },
     etaStat: { flex: 1, alignItems: 'center', gap: 2 },
     etaValue: { fontSize: FontSize.base, fontWeight: FontWeight.black },
     etaLabel: { fontSize: FontSize['2xs'], fontWeight: FontWeight.bold, letterSpacing: LetterSpacing.widest, textTransform: 'uppercase' },
     etaDivider: { width: StyleSheet.hairlineWidth, height: 28 },
-    dirBtn: { paddingHorizontal: Spacing[3], paddingVertical: Spacing[2], borderRadius: Radius.xs },
+    dirBtn: { paddingHorizontal: Spacing[3], paddingVertical: Spacing[2], borderRadius: Radius.pill },
     dirBtnText: { color: '#fff', fontSize: FontSize.xs, fontWeight: FontWeight.black },
 
     // Section card
-    sectionCard: { borderRadius: Radius.md, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden', padding: Spacing[4] },
+    sectionCard: { borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden', padding: Spacing[4] },
     sectionLabel: { fontSize: FontSize['2xs'], fontWeight: FontWeight.black, letterSpacing: LetterSpacing.widest, textTransform: 'uppercase', marginBottom: Spacing[3] },
     sectionBody: { gap: Spacing[2] },
 
     // Medical tags
     tags: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing[2] },
-    tag: { paddingHorizontal: Spacing[2], paddingVertical: Spacing[1], borderRadius: Radius.xs },
+    tag: { paddingHorizontal: Spacing[2], paddingVertical: Spacing[1], borderRadius: Radius.pill },
     tagText: { fontSize: FontSize.xs },
 
     // History rows
     historyRow: {
         flexDirection: 'row', alignItems: 'center', gap: Spacing[3],
-        padding: Spacing[3], borderRadius: Radius.sm, borderWidth: StyleSheet.hairlineWidth,
+        padding: Spacing[3], borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth,
     },
     historyMeta: { flex: 1, gap: 2 },
     historyHospital: { fontSize: FontSize.sm, fontWeight: FontWeight.black },
@@ -558,7 +658,7 @@ const styles = StyleSheet.create({
     statusPillText: { fontSize: FontSize['2xs'], fontWeight: FontWeight.black, textTransform: 'uppercase', letterSpacing: LetterSpacing.wide },
 
     // Member since
-    memberRow: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.xs, padding: Spacing[3], alignItems: 'center' },
+    memberRow: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.xl, padding: Spacing[3], alignItems: 'center' },
     memberText: { fontSize: FontSize.xs },
 
     // Actions
