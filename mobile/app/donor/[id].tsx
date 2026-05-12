@@ -103,6 +103,11 @@ export default function DonorDetailScreen() {
     const [chatRequestId, setChatRequestId] = useState<string | null>(
         passedRequestId ?? null,
     );
+    // Whether the mutual-commitment request is STILL `active`. Call, WhatsApp
+    // and Chat all close together once the request flips to fulfilled /
+    // cancelled / expired — consistent with the closed-state banner in
+    // request/[id].tsx + chat.tsx. Null while we're still loading.
+    const [commitmentActive, setCommitmentActive] = useState<boolean | null>(null);
 
     // Subtle entrance animation for the avatar
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -164,16 +169,34 @@ export default function DonorDetailScreen() {
         Promise.all([fetchDonor(), fetchResponses()]).finally(() => setLoading(false));
     }, [id]);
 
-    // Discover a chat thread when no requestId was passed via query param.
-    // Looks for any accepted/completed response between the viewer and the
-    // donor on either side (donor accepted my request, or I accepted theirs)
-    // and uses the most recent one. The mutual-commitment RLS policy makes
-    // this read safe for both parties.
+    // Discover a chat thread between the viewer and this profile.
+    // Looks for any accepted/completed response on either side and uses the
+    // most recent one. Also reads the parent request's `status` so we can
+    // close Call / WhatsApp / Chat when the request is no longer active.
+    // The mutual-commitment RLS policy makes both reads safe.
     useEffect(() => {
-        if (passedRequestId || !user?.id || !id || user.id === id) return;
+        if (!user?.id || !id || user.id === id) return;
         let cancelled = false;
+
+        const resolveActiveFor = async (rid: string) => {
+            const { data: br } = await supabase
+                .from('blood_requests')
+                .select('status')
+                .eq('id', rid)
+                .maybeSingle();
+            if (cancelled) return;
+            setCommitmentActive(br?.status === 'active');
+        };
+
         (async () => {
             try {
+                // If the caller passed a requestId, use it directly.
+                if (passedRequestId) {
+                    setChatRequestId(passedRequestId);
+                    await resolveActiveFor(passedRequestId);
+                    return;
+                }
+
                 // Path A: this profile is a donor who accepted MY (viewer = recipient's) request
                 const { data: aData } = await supabase
                     .from('request_responses')
@@ -187,7 +210,9 @@ export default function DonorDetailScreen() {
 
                 if (cancelled) return;
                 if ((aData as any)?.request_id) {
-                    setChatRequestId((aData as any).request_id);
+                    const rid: string = (aData as any).request_id;
+                    setChatRequestId(rid);
+                    await resolveActiveFor(rid);
                     return;
                 }
 
@@ -204,14 +229,39 @@ export default function DonorDetailScreen() {
 
                 if (cancelled) return;
                 if ((bData as any)?.request_id) {
-                    setChatRequestId((bData as any).request_id);
+                    const rid: string = (bData as any).request_id;
+                    setChatRequestId(rid);
+                    await resolveActiveFor(rid);
+                    return;
                 }
+
+                // No mutual commitment found at all → no active channel.
+                setCommitmentActive(false);
             } catch (e: any) {
                 if (!cancelled) console.warn('[DonorDetail chat-thread]', e?.message);
             }
         })();
         return () => { cancelled = true; };
     }, [passedRequestId, user?.id, id]);
+
+    // Watch the discovered request's status so the contact channels close
+    // the moment it flips to fulfilled / cancelled / expired without the
+    // user navigating away and back.
+    useEffect(() => {
+        if (!chatRequestId) return;
+        const ch = supabase
+            .channel(`donor_detail_req_${chatRequestId}_${Date.now()}`)
+            .on('postgres_changes', {
+                event: 'UPDATE', schema: 'public',
+                table: 'blood_requests',
+                filter: `id=eq.${chatRequestId}`,
+            }, (payload: any) => {
+                const s = payload?.new?.status;
+                if (s !== undefined) setCommitmentActive(s === 'active');
+            })
+            .subscribe();
+        return () => { supabase.removeChannel(ch); };
+    }, [chatRequestId]);
 
     // ── Derived values ───────────────────────────────────────────────────────
     const isOwnProfile = user?.id === id;
@@ -240,14 +290,29 @@ export default function DonorDetailScreen() {
         .map(n => n[0]?.toUpperCase() ?? '')
         .join('') ?? '';
 
+    // Channels are open ONLY while the mutual-commitment request is active.
+    // Once it flips to fulfilled / cancelled / expired, Call + WhatsApp +
+    // Chat all close together — consistent with the closed-state banner in
+    // request/[id].tsx and the chat composer in chat.tsx.
+    const channelsOpen = commitmentActive === true;
+
     // ── Contact actions ──────────────────────────────────────────────────────
+    // Call uses ONLY the phone column. Email is never a contact channel —
+    // users coordinate via Phone, WhatsApp (when the other party has
+    // whatsapp_available toggled on), or in-app Chat.
     const handleCall = useCallback(() => {
         if (!donor) return;
-        const target = donor.phone ?? donor.email;
-        if (!target) return Alert.alert('No contact info', 'This donor has not shared contact details.');
+        if (!channelsOpen) {
+            Alert.alert('Channel closed', 'This request is no longer active. Call, WhatsApp and chat are closed.');
+            return;
+        }
+        if (!donor.phone) {
+            Alert.alert('No phone shared', "This user hasn't added a phone number. Use chat to reach them.");
+            return;
+        }
         Haptics.selectionAsync().catch(() => {});
-        Linking.openURL(donor.phone ? `tel:${donor.phone}` : `mailto:${donor.email}`);
-    }, [donor]);
+        Linking.openURL(`tel:${donor.phone}`);
+    }, [donor, channelsOpen]);
 
     // In-app chat — NEVER email. Chat threads are scoped to a request_id so
     // both parties open the same conversation that lives behind the existing
@@ -256,6 +321,11 @@ export default function DonorDetailScreen() {
     const handleMessage = useCallback(() => {
         if (!donor || !user?.id) return;
         if (user.id === donor.id) return; // can't message yourself
+        if (!channelsOpen) {
+            Alert.alert('Channel closed', 'This request is no longer active. Chat is closed.');
+            return;
+        }
+        // From here on, follow the existing chatRequestId flow.
         if (!chatRequestId) {
             Alert.alert(
                 'No active thread yet',
@@ -272,7 +342,7 @@ export default function DonorDetailScreen() {
                 receiverName: encodeURIComponent(donor.full_name ?? 'Donor'),
             },
         });
-    }, [donor, user?.id, chatRequestId, router]);
+    }, [donor, user?.id, chatRequestId, router, channelsOpen]);
 
     const handleOpenMap = useCallback(() => {
         if (!donor?.latitude || !donor?.longitude) return;
@@ -512,22 +582,38 @@ export default function DonorDetailScreen() {
                     </Text>
                 </View>
 
-                {/* ── Contact actions ── */}
+                {/* ── Contact actions ──
+                    Call + Message are open only while the mutual-commitment
+                    request is still active. After fulfillment / cancellation
+                    / expiry, the buttons are disabled and a soft banner
+                    explains why — matches the closed-state behaviour on
+                    request/[id].tsx and chat.tsx. */}
                 {!isOwnProfile && (
                     <View style={styles.actionWrap}>
+                        {commitmentActive === false && (
+                            <View style={[styles.liveWaitPill, { backgroundColor: theme.cardElevated, borderColor: theme.border }]}>
+                                <View style={[styles.liveWaitDot, { backgroundColor: theme.textMuted }]} />
+                                <Text style={[styles.liveWaitText, { color: theme.textMuted }]} numberOfLines={2}>
+                                    Channels closed — this request is no longer active.
+                                </Text>
+                            </View>
+                        )}
                         <Button
-                            label="Call donor"
-                            icon={<Ionicons name="call" size={16} color="#fff" />}
+                            label="Call"
+                            icon={<Ionicons name="call" size={16} color={theme.textOnPrimary} />}
                             variant="primary"
                             size="lg"
                             onPress={handleCall}
+                            disabled={!channelsOpen}
                             fullWidth
                         />
                         <Button
-                            label="✉️  Send Message"
+                            label="Message"
+                            icon={<Ionicons name="chatbubble-ellipses-outline" size={16} color={theme.textPrimary} />}
                             variant="outline"
                             size="md"
                             onPress={handleMessage}
+                            disabled={!channelsOpen}
                             fullWidth
                         />
                     </View>
@@ -663,4 +749,11 @@ const styles = StyleSheet.create({
 
     // Actions
     actionWrap: { gap: Spacing[3] },
+    liveWaitPill: {
+        flexDirection: 'row', alignItems: 'center', gap: Spacing[2],
+        paddingHorizontal: Spacing[3], paddingVertical: Spacing[2],
+        borderRadius: Radius.pill, borderWidth: StyleSheet.hairlineWidth,
+    },
+    liveWaitDot: { width: 8, height: 8, borderRadius: 4 },
+    liveWaitText: { flex: 1, fontSize: FontSize.xs, fontWeight: FontWeight.semibold, letterSpacing: LetterSpacing.snug },
 });

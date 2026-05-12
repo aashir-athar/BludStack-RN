@@ -39,10 +39,18 @@ export interface ProfileCardProps {
   onCall?: () => void;
   onMessage?: () => void;
   onWhatsApp?: () => void;
+  /**
+   * When false, the entire contact-pills row (Call / WhatsApp / Chat) is
+   * hidden. Use this once the parent request is no longer active so all
+   * contact channels close together with chat (consistent with the
+   * "chat closed" banner shown when a request flips to fulfilled /
+   * cancelled / expired). Default true keeps backwards-compat.
+   */
+  interactive?: boolean;
 }
 
 const ProfileCard = React.memo(function ProfileCard({
-  profile, compact, onPress, onCall, onMessage, onWhatsApp,
+  profile, compact, onPress, onCall, onMessage, onWhatsApp, interactive = true,
 }: ProfileCardProps) {
   const { theme } = useTheme();
   const { canDonate, daysLeft } = canDonateAgain(profile.last_donation_date);
@@ -121,10 +129,13 @@ const ProfileCard = React.memo(function ProfileCard({
         </View>
       )}
 
-      {/* Contact pill row — only shows when at least one handler is passed
-          AND we have a phone (for call/whatsapp) or onMessage. The recipient
-          gets these unmasked once the donor accepts (parent decides). */}
-      {(onCall || onMessage || onWhatsApp || profile.phone) && (
+      {/* Contact pill row — hidden entirely when `interactive` is false
+          (request not active any more) so Call / WhatsApp / Chat close
+          together with the rest of the disclosure. Otherwise: shows when
+          at least one handler is passed AND we have a phone (for call/
+          whatsapp) or onMessage. The recipient gets these unmasked once
+          the donor accepts (parent decides). */}
+      {interactive && (onCall || onMessage || onWhatsApp || profile.phone) && (
         <View style={[styles.actions, { borderTopColor: theme.divider }]}>
           {(onCall || profile.phone) && (
             <Pressable
