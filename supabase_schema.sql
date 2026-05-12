@@ -159,7 +159,16 @@ create table if not exists public.request_responses (
 
   constraint request_responses_unique unique (request_id, donor_id),
   constraint request_responses_donor_lat_range check (donor_lat is null or (donor_lat between -90  and 90)),
-  constraint request_responses_donor_lon_range check (donor_lon is null or (donor_lon between -180 and 180))
+  constraint request_responses_donor_lon_range check (donor_lon is null or (donor_lon between -180 and 180)),
+  -- Coherence: the three live-location columns must always move together.
+  -- Either no live location yet (all null) or a complete reading (all set).
+  -- Without this, a buggy write could leave e.g. donor_lat with a value but
+  -- donor_lon null, and mobile/app/map/live.tsx + request/[id].tsx would
+  -- read partial coordinates and render off-globe markers.
+  constraint request_responses_donor_location_coherent check (
+       (donor_lat is null and donor_lon is null and donor_location_updated_at is null)
+    or (donor_lat is not null and donor_lon is not null and donor_location_updated_at is not null)
+  )
 );
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -332,6 +341,14 @@ begin
   --   (a) the prior response is marked `completed` (donation recorded), or
   --   (b) the prior request flips to `fulfilled`, `cancelled`, or `expired`.
   -- Checked here (server-side), authoritative regardless of client state.
+  --
+  -- Race serialisation: lock the donor's profile row. Without this lock, two
+  -- concurrent accepts on DIFFERENT requests for the SAME donor would each
+  -- only lock their own blood_requests row and both could pass the check at
+  -- the same time. Locking the profile row forces those concurrent calls to
+  -- serialise on the donor.
+  perform 1 from public.profiles where id = p_donor_id for update;
+
   select rr.request_id
     into v_other_commitment
     from public.request_responses rr
@@ -461,8 +478,13 @@ begin
    where rr.request_id = p_request_id and rr.status = 'completed';
 
   if v_completed_count >= v_units_needed then
+    -- Flip the request to fulfilled. `fulfilled_at` is set by the
+    -- blood_requests_fulfilled_at trigger. We DO NOT write donor_id here:
+    -- with N donors per N units, blood_requests.donor_id can only ever
+    -- record one of N, which is misleading. request_responses.donor_id
+    -- (one row per donor) is the source of truth.
     update public.blood_requests
-       set status = 'fulfilled', donor_id = p_donor_id
+       set status = 'fulfilled'
      where id = p_request_id;
   end if;
 
@@ -853,6 +875,15 @@ revoke all on function public.complete_blood_donation (uuid, uuid, uuid) from pu
 
 grant execute on function public.accept_blood_request    (uuid, uuid)       to service_role;
 grant execute on function public.complete_blood_donation (uuid, uuid, uuid) to service_role;
+
+-- Pin OWNER to service_role for both SECURITY DEFINER RPCs. The RPCs already
+-- work via the JWT-claim fallback in the trigger guards, but `current_user =
+-- 'service_role'` only short-circuits the guard when the function owner IS
+-- service_role (because SECURITY DEFINER sets current_user to the definer).
+-- This is defense-in-depth: even if the JWT-claim path ever changes shape,
+-- the guards still see service_role here.
+alter function public.accept_blood_request    (uuid, uuid)       owner to service_role;
+alter function public.complete_blood_donation (uuid, uuid, uuid) owner to service_role;
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DONE — RLS is now enforced. The mobile client can no longer:

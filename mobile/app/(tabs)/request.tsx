@@ -395,7 +395,7 @@ export default function RequestScreen() {
       });
       toast.success('Request posted', { description: 'Notifying compatible donors near the hospital.' });
       setHospital(''); setHospAddr(''); setNotes(''); setUnits(1);
-      if (req?.id) router.push(`/request/${req.id}` as any);
+      if (req?.id) router.push({ pathname: '/request/[id]', params: { id: req.id } });
     } catch (e: any) {
       errorReporter.error(e, { screen: 'tabs/request' });
       toast.error("Couldn't post the request", { description: e?.message ?? 'Try again.' });
