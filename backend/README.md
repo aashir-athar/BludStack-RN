@@ -272,10 +272,10 @@ Expiry windows by urgency:
 
 > **Geo-fence frequency differs by host.**
 > - On **Railway / Render / self-hosted** the `startWorker()` in `src/server.js` runs an in-process `setInterval` that ticks every **5 seconds**.
-> - On **Vercel** the same logic runs through Vercel Cron (`api/cron/tick-geofence.js`). Vercel's minimum cron interval is **1 minute on Pro / 1 hour on Hobby**. If sub-minute ring expansion matters, deploy to Railway/Render.
+> - On **Vercel** there is no in-process worker (functions are short-lived). The tick logic is exposed as HTTP endpoints (`api/cron/tick-geofence.js`, `api/cron/expire-requests.js`) and **must be triggered by an external scheduler** — Vercel Hobby is daily-only, Pro starts at 1 minute. See the Vercel section below for free schedulers that go down to 1 minute.
 > - Rate-limit state is in-memory (express-rate-limit default). On Vercel each cold start has its own bucket — for production-grade rate limiting on Vercel, swap in `rate-limit-redis` with Upstash.
 
-### Option A — Vercel (serverless, $0–$20/mo)
+### Option A — Vercel (serverless, $0)
 
 1. Push this folder to a GitHub repo
 2. [vercel.com](https://vercel.com) → Add New → Project → import the repo
@@ -286,14 +286,51 @@ Expiry windows by urgency:
    - `NODE_ENV=production`
    - `ALLOWED_ORIGINS=https://your-app-domain.com`
    - `TRUST_PROXY=1`
-   - `CRON_SECRET` (auto-set by Vercel when you add a cron job)
-5. Deploy. Vercel reads `vercel.json` and wires up:
+   - `CRON_SECRET=<generate a long random string>` — used to auth scheduler calls
+5. Deploy. `vercel.json` wires up:
    - `/api/v1/*` → Express app (via `api/index.js`)
    - `/health` → Express app
-   - Cron: `* * * * *` → `/api/cron/tick-geofence` (Pro tier) — drives ring expansion
-   - Cron: `*/10 * * * *` → `/api/cron/expire-requests` — expires stale requests
+   - `/api/cron/*` → scheduled handlers (called externally, see below)
 
 Your API will be at: `https://<your-project>.vercel.app/api/v1/...`
+
+#### Wiring an external scheduler (free, ≥1-minute interval)
+
+You need two scheduled HTTP GETs:
+
+| Endpoint | Recommended interval | Effect |
+|---|---|---|
+| `/api/cron/tick-geofence?secret=<CRON_SECRET>` | every 1 min | Drives ring expansion |
+| `/api/cron/expire-requests?secret=<CRON_SECRET>` | every 10 min | Marks stale requests expired |
+
+Pick one:
+
+- **cron-job.org** (free, 1-min minimum, simplest)
+  1. Sign up → Create cronjob → URL `https://<your-vercel-project>.vercel.app/api/cron/tick-geofence?secret=<CRON_SECRET>` → Schedule "every 1 minute" → Save.
+  2. Repeat for `/api/cron/expire-requests` at 10-minute interval.
+- **Upstash QStash** (free 500 msg/day, very reliable)
+  ```bash
+  curl -X POST "https://qstash.upstash.io/v2/schedules/https://<your-vercel-project>.vercel.app/api/cron/tick-geofence" \
+    -H "Authorization: Bearer <QSTASH_TOKEN>" \
+    -H "Upstash-Cron: */1 * * * *" \
+    -H "Upstash-Forward-Authorization: Bearer <CRON_SECRET>"
+  ```
+- **Supabase pg_cron** (zero extra services, runs inside Postgres)
+  ```sql
+  -- Once: install + grant
+  create extension if not exists pg_cron;
+  -- Schedule the tick every minute
+  select cron.schedule(
+    'bludstack-tick',
+    '* * * * *',
+    $$ select net.http_get(
+         url := 'https://<your-vercel-project>.vercel.app/api/cron/tick-geofence?secret=<CRON_SECRET>'
+       ); $$
+  );
+  ```
+  Requires the `pg_net` extension in Supabase (enabled by default on Pro; on Free, Database → Extensions → enable `pg_net`).
+
+> Geo-fence ring delay defaults to **30 s** (`GEO_EXPANSION_DELAY_SECONDS`). On a 1-minute external tick, the effective ring cadence is 60 s — slightly slower than the 30 s on Railway but still responsive.
 
 ### Option B — Railway (recommended, free hobby tier)
 
