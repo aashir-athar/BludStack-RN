@@ -15,7 +15,7 @@
 // is_verified) are not editable here — they're maintained by the server.
 // ──────────────────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View,
 } from 'react-native';
@@ -90,6 +90,36 @@ export default function ProfileEditScreen() {
   const [pickerOpen,  setPickerOpen]  = useState(false);
   const [saving,      setSaving]      = useState(false);
   const [error,       setError]       = useState<string | null>(null);
+
+  // Late-hydration sync. The auth context can land the profile *after* this
+  // screen mounts (cold-start, deep-link from a push, OTA refresh). Without
+  // this effect, the form would stay on the empty defaults that the useState
+  // initialisers captured at mount.
+  //
+  // We sync exactly ONCE per profile id (and never again on the same id), so
+  // a realtime UPDATE on the profile row can't clobber an in-progress edit.
+  // The `saving` and `pickerOpen` gates are belt-and-braces — they suppress
+  // even the first sync if the user is mid-save or mid-pick.
+  const syncedForIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!profile || saving || pickerOpen) return;
+    if (syncedForIdRef.current === profile.id) return;
+    syncedForIdRef.current = profile.id;
+    setFullName(profile.full_name ?? '');
+    setGender(profile.gender ?? '');
+    setBloodGroup((profile.blood_group as BloodGroup) ?? '');
+    setPhone(profile.phone ?? '');
+    setWhatsapp(profile.whatsapp_available ?? false);
+    setAddress(profile.address ?? '');
+    setConditions(profile.medical_conditions ?? []);
+    setShare(profile.share_medical_history ?? false);
+    setAvailable(profile.is_available_to_donate ?? true);
+    setRole((profile.role as UserRole) ?? 'donor');
+    if (profile.date_of_birth) {
+      const d = new Date(profile.date_of_birth);
+      if (!isNaN(d.getTime())) setDob(d);
+    }
+  }, [profile, saving, pickerOpen]);
 
   const dobIso = useCallback((): string | null => {
     return dob ? dob.toISOString().slice(0, 10) : null;

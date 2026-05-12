@@ -42,7 +42,7 @@ export default function MyRequestsScreen() {
 
   const onCardPress = useCallback((r: BloodRequest) => {
     Haptics.selectionAsync().catch(() => {});
-    router.push(`/request/${r.id}` as any);
+    router.push({ pathname: '/request/[id]', params: { id: r.id } });
   }, [router]);
 
   const onFilter = useCallback((value: Filter) => {
@@ -58,7 +58,7 @@ export default function MyRequestsScreen() {
 
   const newRequest = useCallback(() => {
     Haptics.selectionAsync().catch(() => {});
-    router.push('/(tabs)/request' as any);
+    router.push('/(tabs)/request');
   }, [router]);
 
   return (

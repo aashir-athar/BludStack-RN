@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  Alert, Linking, useWindowDimensions, Animated,
+  Alert, Linking, Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -19,12 +19,11 @@ import { BloodRequest, RequestResponse } from '@/hooks/useRequests';
 import { useLocation } from '@/hooks/useLocation';
 import BloodGroupBadge from '@/components/BloodGroupBadge';
 import ProfileCard from '@/components/ProfileCard';
-import Card from '@/components/Card';
 import Button from '@/components/Button';
 import LoadingScreen from '@/components/LoadingScreen';
-import { FontSize, FontWeight, Spacing, Radius, LetterSpacing, BorderRadius } from '@/constants/Typography';
+import { FontSize, FontWeight, Spacing, Radius, LetterSpacing, Elevation } from '@/constants/Typography';
 import { URGENCY_CONFIG, DONOR_FOR_RECIPIENT } from '@/constants/BloodData';
-import { formatDate, timeAgo } from '@/utils/helpers';
+import { timeAgo } from '@/utils/helpers';
 import { haversineDistance, formatDistance, estimateDriveMinutes, deltaFromKm } from '@/utils/geo';
 
 const URGENCY_COLORS: Record<string, string> = {
@@ -283,7 +282,7 @@ export default function RequestDetailScreen() {
         receiverId:   contact.id,
         receiverName: encodeURIComponent(contact.full_name ?? 'User'),
       },
-    } as any);
+    });
   }, [id, router]);
 
   if (loading) return <LoadingScreen message="Loading request…" />;
@@ -447,11 +446,11 @@ export default function RequestDetailScreen() {
               icon={<Ionicons name="person-circle-outline" size={18} color={theme.textPrimary} />}
               onPress={() => {
                 Haptics.selectionAsync().catch(() => {});
-                const rid = (request.recipient as any)?.id ?? request.recipient_id;
+                const rid: string = (request.recipient as any)?.id ?? request.recipient_id;
                 router.push({
-                  pathname: `/donor/${rid}` as any,
-                  params:   { requestId: String(id) },
-                } as any);
+                  pathname: '/donor/[id]',
+                  params:   { id: rid, requestId: String(id) },
+                });
               }}
               style={{ marginTop: Spacing[3] }}
               accessibilityHint="Open the recipient's full profile"
@@ -503,9 +502,9 @@ export default function RequestDetailScreen() {
                   onPress={() => {
                     Haptics.selectionAsync().catch(() => {});
                     router.push({
-                      pathname: `/donor/${(resp.donor as any).id}` as any,
-                      params:   { requestId: String(id) },
-                    } as any);
+                      pathname: '/donor/[id]',
+                      params:   { id: (resp.donor as any).id, requestId: String(id) },
+                    });
                   }}
                   accessibilityHint="Open the donor's full profile including donation history"
                 />
@@ -528,7 +527,7 @@ export default function RequestDetailScreen() {
                   onPress={() => router.push({
                     pathname: '/map/live',
                     params: { requestId: String(id), role: 'recipient' },
-                  } as any)}
+                  })}
                   style={{ marginTop: Spacing[2] }}
                   accessibilityHint="Open the live map showing donor locations"
                 />
@@ -622,7 +621,7 @@ export default function RequestDetailScreen() {
                   icon={<Ionicons name="navigate" size={18} color={theme.textOnPrimary} />}
                   onPress={() => {
                     Haptics.selectionAsync().catch(() => {});
-                    router.push(`/request/${otherCommitmentId}` as any);
+                    router.push({ pathname: '/request/[id]', params: { id: otherCommitmentId } });
                   }}
                 />
                 <Button
@@ -709,33 +708,64 @@ export default function RequestDetailScreen() {
           </View>
         )}
 
-        {/* ── Closed state — peak-end framing for fulfilled, neutral for the rest ── */}
-        {(isFulfilled || isCancelled || isExpired) && (
-          <View
-            style={[
-              styles.closedBanner,
-              isFulfilled
-                ? { backgroundColor: theme.successSoft, borderColor: theme.success }
-                : { backgroundColor: theme.cardElevated, borderColor: theme.border },
-            ]}
-          >
-            <Ionicons
-              name={isFulfilled ? 'heart' : isCancelled ? 'close-circle' : 'time-outline'}
-              size={20}
-              color={isFulfilled ? theme.success : theme.textMuted}
-            />
-            <Text style={[
-              styles.closedText,
-              { color: isFulfilled ? theme.success : theme.textMuted, marginLeft: Spacing[2] },
+        {/* ── Closed state — peak-end framing for fulfilled, neutral for the
+            rest. Same card language as RequestCard: vertical stripe on the
+            left, icon pill + uppercase tone label up top, headline + body
+            below, optional next-step hint footer. ── */}
+        {(isFulfilled || isCancelled || isExpired) && (() => {
+          const toneColor = isFulfilled ? theme.success : theme.textMuted;
+          const toneSoft  = isFulfilled ? theme.successSoft : theme.cardElevated;
+          const iconName: keyof typeof Ionicons.glyphMap =
+            isFulfilled ? 'heart'
+            : isCancelled ? 'close-circle'
+            : 'time-outline';
+          const toneLabel =
+            isFulfilled ? 'Fulfilled · life saved'
+            : isCancelled ? 'Cancelled'
+            : 'Expired';
+          const headline =
+            isFulfilled ? 'Thank you for showing up'
+            : isCancelled ? 'This request was cancelled'
+            : 'This request timed out';
+          const body =
+            isFulfilled
+              ? 'The donation is recorded. A life was saved because of you — this is the moment everything was built for.'
+              : isCancelled
+                ? "The recipient closed this request. No further action is needed — you can keep an eye on new requests near you."
+                : "No donor accepted in time. If the need still exists, the recipient can post a new request anytime.";
+
+          return (
+            <View style={[
+              styles.closedCard,
+              { backgroundColor: theme.card, borderColor: theme.border },
+              Elevation.xs,
             ]}>
-              {isFulfilled
-                ? 'This request was fulfilled. A life was saved because of you.'
-                : isCancelled
-                ? 'This request was cancelled by the recipient.'
-                : 'This request expired before being fulfilled.'}
-            </Text>
-          </View>
-        )}
+              <View style={[styles.closedStripe, { backgroundColor: toneColor }]} />
+              <View style={styles.closedBody}>
+                <View style={styles.closedHeader}>
+                  <View style={[styles.closedIconPill, { backgroundColor: toneSoft, borderColor: toneColor }]}>
+                    <Ionicons name={iconName} size={18} color={toneColor} />
+                  </View>
+                  <Text style={[styles.closedLabel, { color: toneColor }]} numberOfLines={1}>
+                    {toneLabel}
+                  </Text>
+                </View>
+                <Text style={[styles.closedHeadline, { color: theme.textPrimary }]}>
+                  {headline}
+                </Text>
+                <Text style={[styles.closedBodyText, { color: theme.textMuted }]}>
+                  {body}
+                </Text>
+                <View style={[styles.closedFooterNote, { borderTopColor: theme.divider }]}>
+                  <Ionicons name="chatbubbles-outline" size={14} color={theme.textTertiary} />
+                  <Text style={[styles.closedFooterText, { color: theme.textTertiary }]}>
+                    Chat is closed for this request. You can still view past messages.
+                  </Text>
+                </View>
+              </View>
+            </View>
+          );
+        })()}
 
       </ScrollView>
     </View>
@@ -859,6 +889,54 @@ const styles = StyleSheet.create({
   declinedState: { gap: Spacing[3], padding: Spacing[4], borderRadius: Radius.xl, alignItems: 'center' },
   declinedText:  { fontSize: FontSize.sm, fontStyle: 'italic' },
 
-  closedBanner:  { padding: Spacing[4], borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth },
-  closedText:    { fontSize: FontSize.sm, textAlign: 'center', lineHeight: 20 },
+  // ── Closed-state card (fulfilled / cancelled / expired) ──
+  closedCard: {
+    flexDirection: 'row',
+    borderRadius: Radius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
+  closedStripe: { width: 4 },
+  closedBody:   { flex: 1, padding: Spacing[4], gap: Spacing[2] },
+  closedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+  },
+  closedIconPill: {
+    width: 32, height: 32, borderRadius: Radius.pill,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  closedLabel: {
+    flex: 1,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.black,
+    letterSpacing: LetterSpacing.widest,
+    textTransform: 'uppercase',
+  },
+  closedHeadline: {
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.black,
+    letterSpacing: LetterSpacing.tight,
+    marginTop: Spacing[1],
+  },
+  closedBodyText: {
+    fontSize: FontSize.sm,
+    lineHeight: FontSize.sm * 1.5,
+  },
+  closedFooterNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+    paddingTop: Spacing[3],
+    marginTop: Spacing[2],
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  closedFooterText: {
+    flex: 1,
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.semibold,
+    letterSpacing: LetterSpacing.snug,
+  },
 });
