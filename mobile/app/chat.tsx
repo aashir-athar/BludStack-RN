@@ -1,40 +1,38 @@
 // app/chat.tsx
-// IN-APP CHAT — Real-time messaging between donor and recipient.
-// Accessed via: router.push(`/chat?requestId=...&receiverId=...&receiverName=...`)
+// ─────────────────────────────────────────────────────────────────────────────
+// Donor ↔ Recipient real-time chat scoped to a single blood_request thread.
 //
-// Uses the `messages` table in Supabase with RLS:
-//   - sender_id = auth.uid()
-//   - receiver_id = the other party
-//   - request_id = the blood request context
+// Architecture (per realtime-chat-expo-54-55 skill):
+//   • FlashList v2 with maintainVisibleContentPosition.startRenderingFromBottom
+//     (the v2 chat pattern — `inverted` is deprecated). Pagination fires on
+//     onStartReached because the oldest message is the data "start".
+//   • Optimistic send with idempotency key (client_id) — message renders
+//     instantly with a 'sending' ticker, then reconciles in-place when the
+//     realtime INSERT event echoes the server row.
+//   • Typing indicator via Supabase Realtime broadcast (no DB writes).
+//   • Retry button on failed sends — the unique constraint on client_id makes
+//     retries safe.
+//   • Cleanup: every channel is removed on unmount (otherwise sockets leak
+//     after ~10 navigations).
+//   • Memoized renderItem + stable keyExtractor — required for FlashList v2
+//     recycling to work correctly.
+// ─────────────────────────────────────────────────────────────────────────────
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
-  View, Text, FlatList, TextInput, TouchableOpacity,
-  StyleSheet, KeyboardAvoidingView, Platform, Animated,
+  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Skeleton from '@/components/Skeleton';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/utils/supabase';
+import { useChatMessages, type ChatMessage } from '@/hooks/useChatMessages';
+import { useChatTyping } from '@/hooks/useChatTyping';
 import LoadingScreen from '@/components/LoadingScreen';
-import {
-  FontSize, FontWeight, Spacing, Radius, LetterSpacing,
-} from '@/constants/Typography';
-
-interface Message {
-  id: string;
-  sender_id: string;
-  receiver_id: string;
-  request_id: string;
-  content: string;
-  read: boolean;
-  created_at: string;
-}
-
-function uniqueChannel(prefix: string) {
-  return `${prefix}_${Math.random().toString(36).slice(2, 8)}`;
-}
+import { FontSize, FontWeight, Spacing, Radius, LetterSpacing } from '@/constants/Typography';
 
 export default function ChatScreen() {
   const { requestId, receiverId, receiverName } = useLocalSearchParams<{
@@ -42,108 +40,73 @@ export default function ChatScreen() {
     receiverId: string;
     receiverName: string;
   }>();
-  const { theme }        = useTheme();
-  const { user, profile } = useAuth();
-  const router            = useRouter();
-  const insets            = useSafeAreaInsets();
+  const { theme }    = useTheme();
+  const { user }     = useAuth();
+  const router       = useRouter();
+  const listRef      = useRef<FlashListRef<ChatMessage>>(null);
 
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [text, setText]         = useState('');
-  const [loading, setLoading]   = useState(true);
-  const [sending, setSending]   = useState(false);
-  const listRef = useRef<FlatList>(null);
+  const {
+    messages, loading, hasMore, fetchingOlder,
+    sendMessage, loadOlder, markRead, retrySend,
+  } = useChatMessages(requestId, user?.id, receiverId);
 
-  // ── Fetch all messages for this request between these two users ──────────
-  const fetchMessages = useCallback(async () => {
-    if (!requestId || !user?.id || !receiverId) return;
-    try {
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('request_id', requestId)
-        .or(`and(sender_id.eq.${user.id},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${user.id})`)
-        .order('created_at', { ascending: true });
-      if (error) throw error;
-      setMessages((data as Message[]) ?? []);
-    } catch (e: any) {
-      console.warn('[chat fetchMessages]', e.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [requestId, user?.id, receiverId]);
+  const { otherTyping, notifyTyping } = useChatTyping(requestId, user?.id, receiverId);
 
-  // ── Mark incoming messages as read ───────────────────────────────────────
-  const markRead = useCallback(async () => {
-    if (!requestId || !user?.id || !receiverId) return;
-    await supabase
-      .from('messages')
-      .update({ read: true })
-      .eq('request_id', requestId)
-      .eq('sender_id', receiverId)
-      .eq('receiver_id', user.id)
-      .eq('read', false);
-  }, [requestId, user?.id, receiverId]);
+  const [text, setText] = React.useState('');
+  const [sending, setSending] = React.useState(false);
 
-  useEffect(() => {
-    fetchMessages().then(markRead);
+  // Mark incoming as read on entry + whenever new messages arrive while open
+  useEffect(() => { markRead(); }, [markRead, messages.length]);
 
-    const channel = supabase
-      .channel(uniqueChannel(`chat_${requestId}`))
-      .on('postgres_changes', {
-        event: 'INSERT', schema: 'public', table: 'messages',
-        filter: `request_id=eq.${requestId}`,
-      }, async payload => {
-        const msg = payload.new as Message;
-        // Only add if relevant to this conversation
-        const isRelevant =
-          (msg.sender_id === user?.id && msg.receiver_id === receiverId) ||
-          (msg.sender_id === receiverId && msg.receiver_id === user?.id);
-        if (isRelevant) {
-          setMessages(prev => [...prev, msg]);
-          if (msg.receiver_id === user?.id) markRead();
-        }
-      })
-      .subscribe();
+  const onChangeText = useCallback((next: string) => {
+    setText(next);
+    if (next.length > 0) notifyTyping();
+  }, [notifyTyping]);
 
-    return () => { supabase.removeChannel(channel); };
-  }, [requestId, receiverId, user?.id]);
-
-  // Auto-scroll to bottom on new messages
-  useEffect(() => {
-    if (messages.length > 0) {
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
-    }
-  }, [messages.length]);
-
-  // ── Send a message ────────────────────────────────────────────────────────
-  const sendMessage = useCallback(async () => {
+  const onSend = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed || !user?.id || !receiverId || !requestId || sending) return;
+    if (!trimmed || sending) return;
     setSending(true);
     setText('');
     try {
-      const { error } = await supabase.from('messages').insert({
-        request_id:  requestId,
-        sender_id:   user.id,
-        receiver_id: receiverId,
-        content:     trimmed,
-        read:        false,
-      });
-      if (error) throw error;
-    } catch (e: any) {
-      console.warn('[chat sendMessage]', e.message);
-      setText(trimmed); // restore on fail
+      await sendMessage(trimmed);
+      // Auto-scroll regardless of current position when the user themselves sends.
+      listRef.current?.scrollToEnd({ animated: true });
+    } catch {
+      // Restore the draft on hard failure (the optimistic message stays
+      // marked 'failed' with a retry button)
+      setText(trimmed);
     } finally {
       setSending(false);
     }
-  }, [text, user?.id, receiverId, requestId, sending]);
+  }, [text, sending, sendMessage]);
 
-  const renderMessage = useCallback(({ item, index }: { item: Message; index: number }) => {
-    const isMine  = item.sender_id === user?.id;
-    const isFirst = index === 0;
-    const prevMsg = index > 0 ? messages[index - 1] : null;
-    const showTime = !prevMsg ||
-      new Date(item.created_at).getTime() - new Date(prevMsg.created_at).getTime() > 5 * 60 * 1000;
+  // ── Memoized FlashList configuration (v2 wants stable refs) ───────────
+  const maintainPosition = useMemo(() => ({
+    startRenderingFromBottom: true,
+    autoscrollToBottomThreshold: 0.2,
+  }), []);
+
+  const contentContainerStyle = useMemo(
+    () => ({ paddingHorizontal: Spacing[4], paddingTop: Spacing[4], paddingBottom: Spacing[2] }),
+    [],
+  );
+
+  // ── Bubble renderer (memoized; only depends on messages + user) ───────
+  const renderItem = useCallback(({ item, index }: { item: ChatMessage; index: number }) => {
+    const isMine = item.sender_id === user?.id;
+    const prev   = index > 0 ? messages[index - 1] : null;
+
+    // Group consecutive messages from same sender within 3 minutes
+    const grouped = !!prev
+      && prev.sender_id === item.sender_id
+      && new Date(item.created_at).getTime() - new Date(prev.created_at).getTime() < 3 * 60_000;
+
+    // Show timestamp on first message OR gap > 5 min from previous
+    const showTime = !prev
+      || new Date(item.created_at).getTime() - new Date(prev.created_at).getTime() > 5 * 60_000;
+
+    const status: ChatMessage['_status'] = item._status ?? 'sent';
 
     return (
       <View>
@@ -155,33 +118,66 @@ export default function ChatScreen() {
         <View style={[
           styles.bubbleRow,
           isMine ? styles.bubbleRowMine : styles.bubbleRowTheirs,
+          grouped && styles.bubbleRowGrouped,
         ]}>
           <View style={[
             styles.bubble,
             isMine
-              ? [styles.bubbleMine,   { backgroundColor: theme.primary }]
+              ? [styles.bubbleMine,   { backgroundColor: theme.primary, opacity: status === 'sending' ? 0.7 : 1 }]
               : [styles.bubbleTheirs, { backgroundColor: theme.cardElevated, borderColor: theme.border }],
+            grouped && (isMine ? styles.bubbleMineGrouped : styles.bubbleTheirsGrouped),
           ]}>
             <Text style={[styles.bubbleText, { color: isMine ? '#fff' : theme.textPrimary }]}>
               {item.content}
             </Text>
           </View>
+
           {isMine && (
-            <Text style={[styles.readReceipt, { color: theme.textMuted }]}>
-              {item.read ? '✓✓' : '✓'}
-            </Text>
+            <View style={styles.metaRow}>
+              {status === 'sending' && (
+                <Text style={[styles.metaText, { color: theme.textMuted }]}>Sending…</Text>
+              )}
+              {status === 'failed' && item.client_id && (
+                <TouchableOpacity onPress={() => retrySend(item.client_id!)} hitSlop={8}>
+                  <Text style={[styles.metaText, { color: theme.danger ?? '#E8002D', fontWeight: FontWeight.bold }]}>
+                    Failed · Tap to retry
+                  </Text>
+                </TouchableOpacity>
+              )}
+              {status === 'sent' && (
+                <Text style={[styles.metaText, { color: theme.textMuted }]}>
+                  {item.read ? '✓✓' : '✓'}
+                </Text>
+              )}
+            </View>
           )}
         </View>
       </View>
     );
-  }, [user?.id, messages, theme]);
+  }, [user?.id, messages, theme, retrySend]);
+
+  // Stable keyExtractor — client_id survives the optimistic→server id swap.
+  const keyExtractor = useCallback(
+    (item: ChatMessage) => item.client_id ?? item.id,
+    [],
+  );
+
+  const ListHeaderComponent = useCallback(() => {
+    if (!hasMore && !fetchingOlder) return null;
+    if (!fetchingOlder) return null;
+    return (
+      <View style={styles.olderLoader}>
+        <Skeleton width={60} height={4} radius={2} />
+      </View>
+    );
+  }, [hasMore, fetchingOlder]);
 
   if (loading) return <LoadingScreen message="Loading messages…" />;
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
 
-      {/* Header */}
+      {/* ── Header ───────────────────────────────────────────────────── */}
       <View style={[styles.header, { borderBottomColor: theme.border, backgroundColor: theme.surface }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7}>
           <Text style={[styles.backIcon, { color: theme.textPrimary }]}>←</Text>
@@ -189,21 +185,20 @@ export default function ChatScreen() {
         <View style={styles.headerInfo}>
           <View style={[styles.avatarSmall, { backgroundColor: theme.cardElevated }]}>
             <Text style={[styles.avatarInitial, { color: theme.textPrimary }]}>
-              {decodeURIComponent(receiverName).charAt(0).toUpperCase()}
+              {safeDecode(receiverName).charAt(0).toUpperCase()}
             </Text>
           </View>
-          <View>
+          <View style={{ flex: 1 }}>
             <Text style={[styles.headerName, { color: theme.textPrimary }]} numberOfLines={1}>
-              {decodeURIComponent(receiverName)}
+              {safeDecode(receiverName)}
             </Text>
-            <Text style={[styles.headerSub, { color: theme.textMuted }]}>
-              Re: blood request #{requestId.slice(0, 6).toUpperCase()}
+            <Text style={[styles.headerSub, { color: theme.textMuted }]} numberOfLines={1}>
+              {otherTyping ? 'Typing…' : `Re: blood request #${(requestId ?? '').slice(0, 6).toUpperCase()}`}
             </Text>
           </View>
         </View>
-        {/* View request button */}
         <TouchableOpacity
-          onPress={() => router.push(`/request/${requestId}`)}
+          onPress={() => router.push(`/request/${requestId}` as any)}
           style={[styles.viewReqBtn, { borderColor: theme.border }]}
           activeOpacity={0.7}
         >
@@ -211,48 +206,44 @@ export default function ChatScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Messages list */}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
-        <FlatList
+        {/* ── Messages list (FlashList v2) ───────────────────────────── */}
+        <FlashList
           ref={listRef}
           data={messages}
-          renderItem={renderMessage}
-          keyExtractor={item => item.id}
-          contentContainerStyle={[styles.messageList, messages.length === 0 && styles.messageListEmpty]}
+          renderItem={renderItem}
+          keyExtractor={keyExtractor}
+          // v2 chat pattern: visual bottom = data end. `inverted` is deprecated.
+          maintainVisibleContentPosition={maintainPosition}
+          onStartReached={loadOlder}
+          onStartReachedThreshold={0.5}
+          ListHeaderComponent={ListHeaderComponent}
+          contentContainerStyle={contentContainerStyle}
           showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Text style={styles.emptyIcon}>💬</Text>
-              <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>
-                Start the conversation
-              </Text>
-              <Text style={[styles.emptyDesc, { color: theme.textMuted }]}>
-                Messages are private between you and {decodeURIComponent(receiverName)}.
-              </Text>
-            </View>
-          }
+          // Recycle media-less text bubbles together
+          getItemType={() => 'text'}
         />
 
-        {/* Input bar */}
+        {/* ── Input bar ──────────────────────────────────────────────── */}
         <View style={[styles.inputBar, { backgroundColor: theme.surface, borderTopColor: theme.border }]}>
           <View style={[styles.inputWrap, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder }]}>
             <TextInput
               value={text}
-              onChangeText={setText}
+              onChangeText={onChangeText}
               placeholder="Message…"
               placeholderTextColor={theme.textMuted}
               style={[styles.textInput, { color: theme.textPrimary }]}
               multiline
-              maxLength={1000}
+              maxLength={2000}
               returnKeyType="default"
             />
           </View>
           <TouchableOpacity
-            onPress={sendMessage}
+            onPress={onSend}
             disabled={!text.trim() || sending}
             style={[
               styles.sendBtn,
@@ -268,13 +259,16 @@ export default function ChatScreen() {
   );
 }
 
+function safeDecode(s: string | undefined): string {
+  if (!s) return '';
+  try { return decodeURIComponent(s); } catch { return s; }
+}
+
 function formatTime(iso: string): string {
   const d = new Date(iso);
   const now = new Date();
   const isToday = d.toDateString() === now.toDateString();
-  if (isToday) {
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
+  if (isToday) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) +
     '  ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
@@ -286,21 +280,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing[4], paddingVertical: Spacing[3],
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  backBtn:      { width: 36, height: 36, justifyContent: 'center' },
-  backIcon:     { fontSize: FontSize.xl, fontWeight: FontWeight.bold },
-  headerInfo:   { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing[3] },
-  avatarSmall:  { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  avatarInitial:{ fontSize: FontSize.base, fontWeight: FontWeight.black },
-  headerName:   { fontSize: FontSize.sm, fontWeight: FontWeight.black },
-  headerSub:    { fontSize: FontSize.xs, marginTop: 1 },
+  backBtn:       { width: 36, height: 36, justifyContent: 'center' },
+  backIcon:      { fontSize: FontSize.xl, fontWeight: FontWeight.bold },
+  headerInfo:    { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing[3] },
+  avatarSmall:   { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  avatarInitial: { fontSize: FontSize.base, fontWeight: FontWeight.black },
+  headerName:    { fontSize: FontSize.sm, fontWeight: FontWeight.black },
+  headerSub:     { fontSize: FontSize.xs, marginTop: 1 },
   viewReqBtn: {
     paddingHorizontal: Spacing[2], paddingVertical: Spacing[1],
     borderRadius: Radius.xs, borderWidth: 1,
   },
   viewReqLabel: { fontSize: FontSize.xs, fontWeight: FontWeight.medium },
 
-  messageList:      { padding: Spacing[4], gap: Spacing[1] },
-  messageListEmpty: { flex: 1, justifyContent: 'center' },
+  olderLoader: { paddingVertical: Spacing[3], alignItems: 'center' },
 
   timestamp: {
     textAlign: 'center', fontSize: FontSize.xs,
@@ -308,28 +301,23 @@ const styles = StyleSheet.create({
     letterSpacing: LetterSpacing.wide,
   },
 
-  bubbleRow:       { marginVertical: 2 },
-  bubbleRowMine:   { alignItems: 'flex-end' },
-  bubbleRowTheirs: { alignItems: 'flex-start' },
+  bubbleRow:        { marginVertical: 6 },
+  bubbleRowGrouped: { marginTop: 2 },
+  bubbleRowMine:    { alignItems: 'flex-end' },
+  bubbleRowTheirs:  { alignItems: 'flex-start' },
 
   bubble: {
     maxWidth: '78%', borderRadius: Radius.lg,
     paddingHorizontal: Spacing[4], paddingVertical: Spacing[3],
   },
-  bubbleMine: {
-    borderBottomRightRadius: Radius.xs,
-  },
-  bubbleTheirs: {
-    borderBottomLeftRadius: Radius.xs,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  bubbleText:  { fontSize: FontSize.base, lineHeight: 22 },
-  readReceipt: { fontSize: FontSize.xs, marginTop: 2, marginRight: Spacing[1] },
+  bubbleMine:           { borderBottomRightRadius: Radius.xs },
+  bubbleMineGrouped:    { borderTopRightRadius: Radius.xs },
+  bubbleTheirs:         { borderBottomLeftRadius: Radius.xs, borderWidth: StyleSheet.hairlineWidth },
+  bubbleTheirsGrouped:  { borderTopLeftRadius: Radius.xs },
+  bubbleText:           { fontSize: FontSize.base, lineHeight: 22 },
 
-  empty:      { alignItems: 'center', gap: Spacing[3], paddingVertical: Spacing[12] },
-  emptyIcon:  { fontSize: 44 },
-  emptyTitle: { fontSize: FontSize.lg, fontWeight: FontWeight.black },
-  emptyDesc:  { fontSize: FontSize.sm, textAlign: 'center', lineHeight: 22 },
+  metaRow:  { marginTop: 2, marginRight: Spacing[1] },
+  metaText: { fontSize: FontSize.xs },
 
   inputBar: {
     flexDirection: 'row', alignItems: 'flex-end', gap: Spacing[2],
@@ -337,14 +325,15 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   inputWrap: {
-    flex: 1, borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth,
+    flex: 1, minHeight: 40, maxHeight: 120,
+    borderRadius: Radius.full, borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: Spacing[4], paddingVertical: Spacing[2],
-    maxHeight: 120,
+    justifyContent: 'center',
   },
-  textInput:  { fontSize: FontSize.base, maxHeight: 100 },
+  textInput: { fontSize: FontSize.base, lineHeight: 22, padding: 0 },
   sendBtn: {
     width: 40, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
   },
-  sendIcon:   { fontSize: FontSize.md, fontWeight: FontWeight.black },
+  sendIcon: { fontSize: FontSize.lg, fontWeight: FontWeight.black },
 });
