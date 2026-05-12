@@ -11,6 +11,7 @@ const {
   declineRequest,
   completeDonation,
   getDonationHistory,
+  heartbeat,
 } = require('../controllers/donationController');
 
 // GET  /api/v1/donations/history
@@ -52,6 +53,19 @@ router.post(
   ],
   validate,
   completeDonation,
+);
+
+// POST /api/v1/donations/heartbeat
+router.post(
+  '/heartbeat',
+  requireAuth,
+  [
+    body('requestId').isUUID().withMessage('requestId must be a valid UUID'),
+    body('latitude').isFloat({ min: -90, max: 90 }),
+    body('longitude').isFloat({ min: -180, max: 180 }),
+  ],
+  validate,
+  heartbeat,
 );
 
 module.exports = router;

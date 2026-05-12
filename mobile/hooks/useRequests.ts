@@ -209,9 +209,11 @@ export function useNearbyRequests(
       const resp = await apiListRequests(query);
       let list = (resp?.requests ?? []) as BloodRequest[];
 
-      // Defence-in-depth: client-side compatibility filter on top of the
-      // server's geo filter. Belt + suspenders until /requests supports
-      // `compatibleFor=<donorGroup>` server-side.
+      // Defence-in-depth: filter out the caller's own posts so they never see
+      // their own request in the donor feed, even if backend filtering lags.
+      if (uid) list = list.filter(r => r.recipient_id !== uid);
+
+      // Compatibility filter (donors only see groups they can donate to).
       const myBlood = myGroupRef.current;
       if (isDonorRef.current && myBlood) {
         list = list.filter(r =>

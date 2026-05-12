@@ -35,13 +35,17 @@ async function getCommunityStats(req, res, next) {
       0
     );
 
+    // activeJobCount is async now (DB-backed) — await it so we don't ship
+    // a serialized Promise as the field value.
+    const activeJobs = await activeJobCount().catch(() => 0);
+
     return success(res, {
       total_donations:  totalDonations,
       active_donors:    donorsRes.count   ?? 0,
       total_requests:   requestsRes.count ?? 0,
       fulfilled_requests: fulfilledRes.count ?? 0,
-      lives_helped:     totalDonations * 3, // each donation can help up to 3 recipients
-      active_geo_fencing_jobs: activeJobCount(),
+      lives_helped:     totalDonations, // 1 donor = 1 unit = 1 life (no inflation)
+      active_geo_fencing_jobs: activeJobs,
     });
   } catch (err) {
     next(err);
