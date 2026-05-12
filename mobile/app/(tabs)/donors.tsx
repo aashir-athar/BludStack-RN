@@ -69,9 +69,9 @@ export default function DonorsScreen() {
   ];
   const urgencyOptions = [
     { label: 'All Urgency', value: 'All' },
-    { label: '🚨 Critical', value: 'critical', description: 'Needed within 30 min' },
-    { label: '⚠️ Urgent',   value: 'urgent',   description: 'Needed within 2 hrs' },
-    { label: '✅ Standard', value: 'standard', description: 'Scheduled donation' },
+    { label: 'Critical', value: 'critical', description: 'Needed within 30 min' },
+    { label: 'Urgent',   value: 'urgent',   description: 'Needed within 2 hours' },
+    { label: 'Standard', value: 'standard', description: 'Scheduled donation' },
   ];
 
   const hasFilters = filterBlood !== 'All' || filterUrgency !== 'All';

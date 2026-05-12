@@ -1,129 +1,215 @@
 // constants/Colors.ts
-// BludStack — Uber-inspired design system
-// Pure black base · Surgical white type · Blood red as the ONLY accent
-// No gradients. No glass. No neon. Just weight, space, and contrast.
+// BludStack — 2026 brand palette.
+// Distinct from Uber. Warm onyx, warm bone, crimson-on-saline duality.
+// Designed for medical urgency + emotional trust. Every token is semantic.
 
 export const palette = {
-  // Absolute
-  black:      '#000000',
-  white:      '#FFFFFF',
-  offBlack:   '#080808',
+  // ── Absolute (used by tokens; do not consume directly in components) ─────
+  pure: '#FFFFFF',
+  ink:  '#000000',
 
-  // Surfaces — dark
-  surface0:   '#0A0A0A', // deepest bg
-  surface1:   '#111111', // card bg
-  surface2:   '#1A1A1A', // elevated
-  surface3:   '#242424', // input bg
-  surface4:   '#2E2E2E', // border/divider
+  // ── Crimson — the brand signature. Warmer than Uber red, more medical.
+  crimson900: '#7A0C20',
+  crimson800: '#A41030',
+  crimson700: '#C8163C',
+  crimson600: '#D4183D', // primary
+  crimson500: '#E5314F',
+  crimson400: '#EF5570',
+  crimson300: '#F69CAC',
+  crimson200: '#FBC7D1',
+  crimson100: '#FDE4EA',
+  crimson050: '#FDF1F4',
 
-  // Surfaces — light
-  lSurface0:  '#F6F6F6',
-  lSurface1:  '#FFFFFF',
-  lSurface2:  '#F0F0F0',
-  lSurface3:  '#E8E8E8',
-  lSurface4:  '#D8D8D8',
+  // ── Saline — trust + medical green. Used for success, verified, available.
+  saline900: '#04382A',
+  saline800: '#075A41',
+  saline700: '#0B7C58',
+  saline600: '#0EA371',
+  saline500: '#14C083',
+  saline400: '#3DD49B',
+  saline300: '#7CE3B9',
+  saline200: '#B6F0D6',
+  saline100: '#DCF7E8',
 
-  // Type — dark mode
-  textPrimary:   '#FFFFFF',
-  textSecondary: '#9B9B9B',
-  textTertiary:  '#5A5A5A',
-  textDisabled:  '#3A3A3A',
+  // ── Plasma — amber for "urgent" tier. Warmer than pure orange.
+  plasma900: '#5F3700',
+  plasma800: '#8A4E00',
+  plasma700: '#B86B0A',
+  plasma600: '#E08410',
+  plasma500: '#F5A623',
+  plasma400: '#FFB94D',
+  plasma300: '#FFD183',
+  plasma200: '#FFE3B0',
+  plasma100: '#FFF1D6',
 
-  // Type — light mode
-  lTextPrimary:   '#000000',
-  lTextSecondary: '#6B6B6B',
-  lTextTertiary:  '#9B9B9B',
-  lTextDisabled:  '#C4C4C4',
+  // ── Onyx — dark surfaces. Warm undertone, never pure black.
+  onyx950: '#0A0910',
+  onyx900: '#0F0E14',
+  onyx850: '#161520',
+  onyx800: '#1C1B27',
+  onyx750: '#23222E',
+  onyx700: '#2C2B38',
+  onyx600: '#3A3946',
+  onyx500: '#4E4D5A',
+  onyx400: '#6C6B78',
+  onyx300: '#8C8B96',
+  onyx200: '#B5B4BC',
+  onyx100: '#D7D6DC',
 
-  // The ONE accent — blood
-  red:        '#E8002D', // Uber red, slightly shifted for medical feel
-  redDark:    '#B8001F',
-  redLight:   '#FF1744',
-  redMuted:   '#E8002D18',
-  redSubtle:  '#E8002D0A',
+  // ── Bone — light surfaces. Warm off-white, never pure white.
+  bone050: '#FAF8F5',
+  bone100: '#F4F2EE',
+  bone200: '#EAE7E2',
+  bone300: '#DDD9D2',
+  bone400: '#C1BDB6',
+  bone500: '#9C9890',
+  bone600: '#75716A',
+  bone700: '#4F4C46',
+  bone800: '#2D2C28',
 
-  // Semantic
-  green:      '#00A651',
-  greenMuted: '#00A65118',
-  amber:      '#F5A623',
-  amberMuted: '#F5A62318',
+  // ── Always-on alphas (overlays, scrims, pressed states) ──────────────────
+  alphaInkXL:   'rgba(15,14,20,0.72)',  // modal scrim, dark
+  alphaInkL:    'rgba(15,14,20,0.55)',
+  alphaInkM:    'rgba(15,14,20,0.32)',
+  alphaInkS:    'rgba(15,14,20,0.12)',
+  alphaInkXS:   'rgba(15,14,20,0.06)',
+  alphaPureXL:  'rgba(255,255,255,0.85)',
+  alphaPureL:   'rgba(255,255,255,0.55)',
+  alphaPureM:   'rgba(255,255,255,0.18)',
+  alphaPureS:   'rgba(255,255,255,0.08)',
+  alphaPureXS:  'rgba(255,255,255,0.04)',
 };
 
 export const Colors = {
   dark: {
-    background:    palette.surface0,
-    surface:       palette.surface1,
-    card:          palette.surface1,
-    cardElevated:  palette.surface2,
-    border:        palette.surface4,
-    divider:       palette.surface3,
-    inputBg:       palette.surface3,
-    inputBorder:   palette.surface4,
-    inputFocus:    palette.white,
+    // ── Surfaces (Surface component reads from these) ──────────────────────
+    background:     palette.onyx950,
+    surface:        palette.onyx900,
+    surfaceMuted:   palette.onyx850,
+    card:           palette.onyx850,
+    cardElevated:   palette.onyx800,
+    cardHover:      palette.onyx750,
 
-    textPrimary:   palette.textPrimary,
-    textSecondary: palette.textSecondary,
-    textMuted:     palette.textTertiary,
-    textDisabled:  palette.textDisabled,
-    textInverse:   palette.black,
+    // ── Borders + dividers ────────────────────────────────────────────────
+    border:         palette.onyx700,
+    borderStrong:   palette.onyx600,
+    divider:        palette.onyx750,
 
-    primary:       palette.red,
-    primaryDark:   palette.redDark,
-    primaryLight:  palette.redLight,
-    primaryMuted:  palette.redMuted,
-    primarySubtle: palette.redSubtle,
+    // ── Input ─────────────────────────────────────────────────────────────
+    inputBg:        palette.onyx850,
+    inputBorder:    palette.onyx700,
+    inputFocus:     palette.crimson500,
+    inputError:     palette.crimson500,
+    placeholder:    palette.onyx400,
 
-    success:       palette.green,
-    successMuted:  palette.greenMuted,
-    warning:       palette.amber,
-    warningMuted:  palette.amberMuted,
-    error:         palette.red,
+    // ── Text ──────────────────────────────────────────────────────────────
+    textPrimary:    palette.pure,
+    textSecondary:  palette.onyx200,
+    textMuted:      palette.onyx300,
+    textTertiary:   palette.onyx400,
+    textDisabled:   palette.onyx500,
+    textInverse:    palette.ink,
+    textOnPrimary:  palette.pure,
 
-    tabBar:        palette.surface1,
-    tabActive:     palette.white,
-    tabInactive:   palette.textTertiary,
+    // ── Brand ─────────────────────────────────────────────────────────────
+    primary:        palette.crimson600,
+    primaryHover:   palette.crimson500,
+    primaryDeep:    palette.crimson700,
+    primarySoft:    'rgba(212,24,61,0.18)',
+    primaryGhost:   'rgba(212,24,61,0.08)',
 
-    shadowColor:   '#000000',
-    overlay:       'rgba(0,0,0,0.7)',
-    pillBg:        palette.surface3,
+    // ── Semantic ──────────────────────────────────────────────────────────
+    success:        palette.saline500,
+    successSoft:    'rgba(20,192,131,0.16)',
+    successDeep:    palette.saline700,
+    warning:        palette.plasma500,
+    warningSoft:    'rgba(245,166,35,0.18)',
+    warningDeep:    palette.plasma700,
+    danger:         palette.crimson500,
+    dangerSoft:     'rgba(229,49,79,0.18)',
+    info:           palette.onyx300,
+    infoSoft:       palette.alphaPureS,
+
+    // ── Tab bar ───────────────────────────────────────────────────────────
+    tabBar:         palette.onyx850,
+    tabBarBorder:   palette.onyx700,
+    tabActive:      palette.pure,
+    tabInactive:    palette.onyx300,
+
+    // ── Effects ───────────────────────────────────────────────────────────
+    shadowColor:    palette.ink,
+    scrim:          palette.alphaInkXL,
+    overlay:        palette.alphaInkL,
+    pillBg:         palette.onyx800,
+    pillBgStrong:   palette.onyx750,
+
+    // ── Map (for react-native-maps custom style) ──────────────────────────
+    mapBg:          palette.onyx900,
   },
   light: {
-    background:    palette.lSurface0,
-    surface:       palette.lSurface1,
-    card:          palette.lSurface1,
-    cardElevated:  palette.lSurface2,
-    border:        palette.lSurface4,
-    divider:       palette.lSurface3,
-    inputBg:       palette.lSurface2,
-    inputBorder:   palette.lSurface4,
-    inputFocus:    palette.black,
+    background:     palette.bone050,
+    surface:        palette.pure,
+    surfaceMuted:   palette.bone100,
+    card:           palette.pure,
+    cardElevated:   palette.bone100,
+    cardHover:      palette.bone200,
 
-    textPrimary:   palette.lTextPrimary,
-    textSecondary: palette.lTextSecondary,
-    textMuted:     palette.lTextTertiary,
-    textDisabled:  palette.lTextDisabled,
-    textInverse:   palette.white,
+    border:         palette.bone300,
+    borderStrong:   palette.bone400,
+    divider:        palette.bone200,
 
-    primary:       palette.red,
-    primaryDark:   palette.redDark,
-    primaryLight:  palette.redLight,
-    primaryMuted:  palette.redMuted,
-    primarySubtle: palette.redSubtle,
+    inputBg:        palette.bone100,
+    inputBorder:    palette.bone300,
+    inputFocus:     palette.crimson600,
+    inputError:     palette.crimson600,
+    placeholder:    palette.bone500,
 
-    success:       palette.green,
-    successMuted:  palette.greenMuted,
-    warning:       palette.amber,
-    warningMuted:  palette.amberMuted,
-    error:         palette.red,
+    textPrimary:    palette.onyx900,
+    textSecondary:  palette.bone800,
+    textMuted:      palette.bone600,
+    textTertiary:   palette.bone500,
+    textDisabled:   palette.bone400,
+    textInverse:    palette.pure,
+    textOnPrimary:  palette.pure,
 
-    tabBar:        palette.white,
-    tabActive:     palette.black,
-    tabInactive:   palette.lTextTertiary,
+    primary:        palette.crimson600,
+    primaryHover:   palette.crimson700,
+    primaryDeep:    palette.crimson800,
+    primarySoft:    palette.crimson100,
+    primaryGhost:   palette.crimson050,
 
-    shadowColor:   '#000000',
-    overlay:       'rgba(0,0,0,0.5)',
-    pillBg:        palette.lSurface2,
+    success:        palette.saline600,
+    successSoft:    palette.saline100,
+    successDeep:    palette.saline800,
+    warning:        palette.plasma600,
+    warningSoft:    palette.plasma100,
+    warningDeep:    palette.plasma800,
+    danger:         palette.crimson600,
+    dangerSoft:     palette.crimson100,
+    info:           palette.bone600,
+    infoSoft:       palette.bone100,
+
+    tabBar:         palette.pure,
+    tabBarBorder:   palette.bone200,
+    tabActive:      palette.onyx900,
+    tabInactive:    palette.bone500,
+
+    shadowColor:    palette.onyx900,
+    scrim:          palette.alphaInkL,
+    overlay:        palette.alphaInkM,
+    pillBg:         palette.bone100,
+    pillBgStrong:   palette.bone200,
+
+    mapBg:          palette.bone050,
   },
 };
 
 export type ThemeColors = typeof Colors.dark;
+
+// ── Urgency-tier specific colors (consumed by RequestCard / UrgencyBanner) ──
+// Map server-side urgency_enum to a semantic surface color.
+export const UrgencyTone = {
+  critical: { tone: 'primary',  label: 'Critical' },
+  urgent:   { tone: 'warning',  label: 'Urgent'   },
+  standard: { tone: 'success',  label: 'Standard' },
+} as const;

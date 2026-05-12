@@ -32,15 +32,32 @@ async function sendPushNotifications(messages) {
       continue;
     }
 
+    const isEmergency = msg.channelId === 'emergency';
+
+    // ── Killed-state delivery rules ───────────────────────────────────────
+    // iOS: `interruptionLevel: 'time-sensitive'` punches through Focus modes
+    //   without the special "Critical Alerts" Apple entitlement.
+    //   `mutableContent` enables our notification-service extension (if any)
+    //   to enrich the payload before display.
+    // Android: `priority: 'high'` maps to FCM `priority: high` (wakes the
+    //   device immediately). `ttl: 0` tells FCM "deliver now or drop" — so a
+    //   2-hour-stale 'blood needed' push never wakes someone at midnight.
+    // Both: `_displayInForeground` ensures the notification still shows when
+    //   the app is in the foreground (default behaviour suppresses it).
     expoMessages.push({
       to:        msg.token,
       sound:     msg.sound ?? 'default',
       title:     msg.title,
+      subtitle:  msg.subtitle,
       body:      msg.body,
-      data:      msg.data ?? {},
+      data:      { ...(msg.data ?? {}), _displayInForeground: true },
       badge:     msg.badge ?? 1,
       channelId: msg.channelId ?? 'default',
-      priority:  msg.channelId === 'emergency' ? 'high' : 'normal',
+      priority:  isEmergency ? 'high' : 'normal',
+      ttl:       isEmergency ? 0 : 3600,
+      mutableContent: true,
+      // iOS-only — Expo passes this through to APNs
+      ...(isEmergency ? { _category: 'emergency', interruptionLevel: 'time-sensitive' } : { interruptionLevel: 'active' }),
     });
   }
 
@@ -49,6 +66,11 @@ async function sendPushNotifications(messages) {
   // Expo recommends chunking into batches of 100
   const chunks = expo.chunkPushNotifications(expoMessages);
 
+  // We need to map ticket-index → token so we can prune dead tokens.
+  const tokenByIndex = expoMessages.map(m => m.to);
+  const deadTokens = new Set();
+
+  let cursor = 0;
   for (const chunk of chunks) {
     try {
       const ticketChunk = await expo.sendPushNotificationsAsync(chunk);
@@ -59,17 +81,33 @@ async function sendPushNotifications(messages) {
         } else {
           results.failed++;
           results.errors.push(ticket.message ?? ticket.details);
-
           if (ticket.details?.error === 'DeviceNotRegistered') {
-            // Token is stale — caller should remove it from DB
-            console.warn('[notify] DeviceNotRegistered:', ticket.message);
+            const tok = tokenByIndex[cursor];
+            if (tok) deadTokens.add(tok);
           }
         }
+        cursor++;
       }
     } catch (err) {
       console.error('[notify] Chunk send error:', err.message);
       results.failed += chunk.length;
       results.errors.push(err.message);
+      cursor += chunk.length;
+    }
+  }
+
+  // Prune permanently-invalid tokens. Lazy import to avoid a circular
+  // require with the supabase admin client at module load.
+  if (deadTokens.size > 0) {
+    try {
+      const { supabaseAdmin } = require('../utils/supabaseAdmin');
+      await supabaseAdmin
+        .from('profiles')
+        .update({ push_token: null })
+        .in('push_token', Array.from(deadTokens));
+      console.log(`[notify] Pruned ${deadTokens.size} dead push token(s)`);
+    } catch (err) {
+      console.error('[notify] Token prune failed:', err.message);
     }
   }
 

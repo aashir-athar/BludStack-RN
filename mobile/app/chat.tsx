@@ -27,6 +27,7 @@ import Skeleton from '@/components/Skeleton';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useChatMessages, type ChatMessage } from '@/hooks/useChatMessages';
@@ -145,9 +146,13 @@ export default function ChatScreen() {
                 </TouchableOpacity>
               )}
               {status === 'sent' && (
-                <Text style={[styles.metaText, { color: theme.textMuted }]}>
-                  {item.read ? '✓✓' : '✓'}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                  <Ionicons
+                    name={item.read ? 'checkmark-done' : 'checkmark'}
+                    size={14}
+                    color={item.read ? theme.success : theme.textMuted}
+                  />
+                </View>
               )}
             </View>
           )}
@@ -180,7 +185,7 @@ export default function ChatScreen() {
       {/* ── Header ───────────────────────────────────────────────────── */}
       <View style={[styles.header, { borderBottomColor: theme.border, backgroundColor: theme.surface }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7}>
-          <Text style={[styles.backIcon, { color: theme.textPrimary }]}>←</Text>
+          <Ionicons name="chevron-back" size={22} color={theme.textPrimary} />
         </TouchableOpacity>
         <View style={styles.headerInfo}>
           <View style={[styles.avatarSmall, { backgroundColor: theme.cardElevated }]}>
@@ -251,7 +256,11 @@ export default function ChatScreen() {
             ]}
             activeOpacity={0.8}
           >
-            <Text style={[styles.sendIcon, { color: text.trim() ? '#fff' : theme.textMuted }]}>↑</Text>
+            <Ionicons
+              name="arrow-up"
+              size={20}
+              color={text.trim() ? theme.textOnPrimary : theme.textMuted}
+            />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>

@@ -13,9 +13,12 @@ import { Platform } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiRegisterPushToken } from '@/utils/api';
 
+// Foreground handler — show the banner + play sound even when the app is open,
+// so a donor reading the feed still sees an incoming critical request.
+// `shouldShowBanner` / `shouldShowList` are the SDK 54 split of the legacy
+// `shouldShowAlert`.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
     shouldShowBanner: true,
@@ -48,23 +51,32 @@ export function useNotifications() {
         return;
       }
 
-      // 2. Android channels
+      // 2. Android channels.
+      // `emergency` MUST be MAX importance so it bypasses Do Not Disturb on
+      // Android 8+. `default` is HIGH (heads-up, but respects DND).
+      // bypassDnd=true on emergency lets the channel ring even in silent mode —
+      // matches the iOS time-sensitive escalation we send from the backend.
       if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('default', {
-          name: 'BludStack Alerts',
-          importance: Notifications.AndroidImportance.MAX,
-          vibrationPattern: [0, 250, 250, 250],
-          lightColor: '#FF2D55',
+          name: 'BludStack Updates',
+          description: 'Status changes on requests you posted or accepted',
+          importance: Notifications.AndroidImportance.HIGH,
+          vibrationPattern: [0, 200, 100, 200],
           sound: 'default',
           enableVibrate: true,
+          showBadge: true,
         });
         await Notifications.setNotificationChannelAsync('emergency', {
-          name: 'Emergency Requests',
-          importance: Notifications.AndroidImportance.HIGH,
-          vibrationPattern: [0, 500, 200, 500],
-          lightColor: '#FF2D55',
+          name: 'Emergency Blood Requests',
+          description: 'Life-critical alerts. Bypasses silent mode and DND.',
+          importance: Notifications.AndroidImportance.MAX,
+          vibrationPattern: [0, 500, 200, 500, 200, 500],
           sound: 'default',
           enableVibrate: true,
+          enableLights: true,
+          showBadge: true,
+          bypassDnd: true,
+          lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
         });
       }
 
