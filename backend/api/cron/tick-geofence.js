@@ -1,23 +1,32 @@
 // api/cron/tick-geofence.js
-// Vercel Cron handler — drives the geo-fence ring expansion.
+// Scheduled handler — drives the geo-fence ring expansion.
 //
-// Scheduling lives in vercel.json. The handler is protected by the standard
-// Vercel `CRON_SECRET` env var so only Vercel's scheduler can fire it.
+// Vercel Hobby caps cron at DAILY, which is useless for ring expansion.
+// `vercel.json` therefore does NOT register a Vercel Cron entry; instead this
+// endpoint is hit by an external scheduler (cron-job.org, Upstash QStash,
+// Supabase pg_cron, GitHub Actions, etc.) on the schedule of your choice.
 //
-// IMPORTANT: Vercel's minimum cron interval is 1 minute (Pro) / 1 hour (Hobby).
-// The geo-fence design wants 5-second ticks; on Vercel the practical floor is
-// 1 minute. If you need sub-minute fan-out, deploy to Railway/Render instead
-// where startWorker() in src/server.js handles a 5-second in-process tick.
+// Auth: send the shared secret in EITHER
+//   • Authorization: Bearer <CRON_SECRET>  (Vercel-Cron-style; preferred)
+//   • ?secret=<CRON_SECRET>                (query param; most external services)
+//
+// If CRON_SECRET is unset, the endpoint stays open — fine for local development,
+// NEVER for production. Always set CRON_SECRET in your hosting env.
 
 'use strict';
 
 const { tick } = require('../../src/services/geoFencingService');
 
-module.exports = async (req, res) => {
-  // Auth — Vercel Cron sets Authorization: Bearer <CRON_SECRET>
-  const auth   = req.headers?.authorization ?? '';
+function isAuthorised(req) {
   const secret = process.env.CRON_SECRET;
-  if (secret && auth !== `Bearer ${secret}`) {
+  if (!secret) return true; // unset = unprotected (dev only)
+  const auth  = req.headers?.authorization ?? '';
+  const query = (req.query && (req.query.secret ?? req.query.token)) ?? null;
+  return auth === `Bearer ${secret}` || query === secret;
+}
+
+module.exports = async (req, res) => {
+  if (!isAuthorised(req)) {
     return res.status(401).json({ error: 'Unauthorised' });
   }
 
