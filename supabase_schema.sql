@@ -417,6 +417,30 @@ alter table public.blood_requests    enable row level security;
 alter table public.request_responses enable row level security;
 alter table public.messages          enable row level security;
 
+-- ── Table-level grants ─────────────────────────────────────────────────────
+-- Postgres checks table-level GRANTs BEFORE RLS policies. If these are
+-- missing, the user gets "permission denied for table X" even with a correct
+-- RLS policy. Supabase's default grants can be revoked accidentally or
+-- changed across project ages — these explicit grants make the schema
+-- self-contained.
+grant usage on schema public to anon, authenticated, service_role;
+
+-- profiles: own-row read/insert/update (insert/update gated by RLS policy)
+grant select, insert, update on public.profiles          to authenticated;
+grant all                    on public.profiles          to service_role;
+
+-- blood_requests: read active/own + update own status to 'cancelled'
+grant select, update         on public.blood_requests    to authenticated;
+grant all                    on public.blood_requests    to service_role;
+
+-- request_responses: read only from the client; backend RPCs write
+grant select                 on public.request_responses to authenticated;
+grant all                    on public.request_responses to service_role;
+
+-- messages: read party threads, insert as sender, flip read flag as receiver
+grant select, insert, update on public.messages          to authenticated;
+grant all                    on public.messages          to service_role;
+
 -- Drop existing policies so this file is idempotent
 do $$
 declare r record;

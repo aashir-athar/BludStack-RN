@@ -4,9 +4,14 @@
 /**
  * Global Express error handler.
  * Must have 4 parameters to be recognised as an error handler by Express.
+ *
+ * Surfaces the Postgres / Supabase error code + message back to the client
+ * when DEBUG_ERRORS=1 (or NODE_ENV != production). Production with the flag
+ * unset still returns the generic "Internal server error" message.
  */
 function errorHandler(err, req, res, _next) {
-  const isDev = process.env.NODE_ENV !== 'production';
+  const isDev    = process.env.NODE_ENV !== 'production';
+  const debugErr = isDev || process.env.DEBUG_ERRORS === '1';
 
   // Supabase / Postgres errors
   if (err.code === 'PGRST116') {
@@ -23,13 +28,23 @@ function errorHandler(err, req, res, _next) {
     return res.status(400).json({ success: false, error: 'Invalid JSON body', status: 400 });
   }
 
-  console.error(`[${req.method}] ${req.path} —`, err.message ?? err);
+  // Structured server-side log (goes to Vercel function logs)
+  console.error(`[err] ${req.method} ${req.path}`, {
+    code:    err.code,
+    message: err.message,
+    details: err.details,
+    hint:    err.hint,
+  });
 
   return res.status(err.status ?? 500).json({
     success: false,
-    error:   isDev ? (err.message ?? 'Internal server error') : 'Internal server error',
+    error:   debugErr ? (err.message ?? 'Internal server error') : 'Internal server error',
     status:  err.status ?? 500,
-    ...(isDev && { stack: err.stack }),
+    ...(debugErr && {
+      pgCode:  err.code,
+      pgHint:  err.hint,
+      details: err.details,
+    }),
   });
 }
 

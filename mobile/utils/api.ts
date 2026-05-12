@@ -23,15 +23,24 @@ import { supabase } from './supabase';
 export const BACKEND_URL =
   process.env.EXPO_PUBLIC_API_URL ?? 'https://bludstack-rn-production.up.railway.app/api/v1';
 
-export class ApiError extends Error {
-  status: number;
-  data?: unknown;
+// We deliberately do NOT extend Error here. React Native / Hermes has a long-
+// standing Babel `wrapNativeSuper` bug that breaks `class X extends Error` at
+// construction time. Using a plain class with a discriminator avoids it.
+export class ApiError {
+  readonly isApiError = true as const;
+  readonly name = 'ApiError';
+  readonly message: string;
+  readonly status: number;
+  readonly data?: unknown;
   constructor(message: string, status: number, data?: unknown) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-    this.data = data;
+    this.message = message;
+    this.status  = status;
+    this.data    = data;
   }
+}
+
+export function isApiError(err: unknown): err is ApiError {
+  return !!err && typeof err === 'object' && (err as ApiError).isApiError === true;
 }
 
 async function authHeader(): Promise<Record<string, string>> {

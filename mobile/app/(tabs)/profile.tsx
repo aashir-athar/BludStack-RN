@@ -5,6 +5,7 @@ import {
   TouchableOpacity, Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -48,9 +49,9 @@ export default function ProfileScreen() {
   const statusLabel    = available ? 'Available to donate' : daysLeft > 0 ? `Eligible in ${daysLeft} days` : 'Paused';
 
   const themeOptions = [
-    { label: 'Dark',   value: 'dark',   icon: '🌙', description: 'Black background' },
-    { label: 'Light',  value: 'light',  icon: '☀️', description: 'White background' },
-    { label: 'System', value: 'system', icon: '📱', description: 'Follows device setting' },
+    { label: 'Dark',   value: 'dark',   description: 'Crimson on warm onyx' },
+    { label: 'Light',  value: 'light',  description: 'Crimson on warm bone' },
+    { label: 'System', value: 'system', description: 'Follows your device' },
   ];
   const bloodOptions = BLOOD_GROUPS.map(bg => ({ label: bg, value: bg }));
 
@@ -123,7 +124,6 @@ export default function ProfileScreen() {
             description="Receive alerts when someone nearby needs your blood group"
             value={profile.is_available_to_donate}
             onValueChange={v => toggle('is_available_to_donate', v)}
-            icon="🩸"
             disabled={saving || !canDonate}
           />
           <ToggleSwitch
@@ -131,7 +131,6 @@ export default function ProfileScreen() {
             description="Let matched donors/recipients see your disclosed conditions"
             value={profile.share_medical_history}
             onValueChange={v => toggle('share_medical_history', v)}
-            icon="🔒"
             disabled={saving}
           />
         </View>
@@ -142,7 +141,7 @@ export default function ProfileScreen() {
             <SectionHeader label="DISCLOSED CONDITIONS" theme={theme} />
             <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
               <Text style={[styles.medNote, { color: theme.textMuted }]}>
-                {profile.share_medical_history ? 'Visible to matched parties' : '🔒 Private — only you can see this'}
+                {profile.share_medical_history ? 'Visible to matched parties' : 'Private — only you can see this'}
               </Text>
               <View style={styles.tags}>
                 {profile.medical_conditions!.map(c => (
@@ -162,7 +161,11 @@ export default function ProfileScreen() {
           style={[styles.settingRow, { backgroundColor: theme.card, borderColor: theme.border }]}
           activeOpacity={0.7}
         >
-          <Text style={{ fontSize: 20 }}>{mode === 'dark' ? '🌙' : mode === 'light' ? '☀️' : '📱'}</Text>
+          <Ionicons
+            name={mode === 'dark' ? 'moon' : mode === 'light' ? 'sunny' : 'phone-portrait-outline'}
+            size={20}
+            color={theme.textPrimary}
+          />
           <View style={{ flex: 1, marginLeft: Spacing[3] }}>
             <Text style={[styles.rowTitle, { color: theme.textPrimary }]}>Appearance</Text>
             <Text style={[styles.rowSub, { color: theme.textMuted }]}>

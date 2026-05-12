@@ -1,140 +1,266 @@
 // app/onboarding.tsx
-import React, { useState, useCallback } from 'react';
+// Lever: progressive disclosure + commitment escalation. Role choice is the
+// first ask — every screen after it is conditional, so users only ever see
+// the next decision they have to make, never a wall of fields.
+//
+// Server-enforced rules mirrored client-side (with kinder copy):
+//   • Donor / Both => date_of_birth REQUIRED and age >= 18
+//   • Recipient    => DOB and medical history are optional / skipped
+//
+// Copy lens: each step has a question header (most-aware framing) and a single
+// affirmative CTA. The role step uses BAB (Before/After/Bridge) — paint who
+// they want to be (a donor, a recipient, both) before asking for data.
+
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
-  TouchableOpacity,
+  KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View,
   useWindowDimensions,
-  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { Ionicons } from '@expo/vector-icons';
+import Animated, {
+  FadeIn, FadeOut, SlideInRight, SlideOutLeft,
+} from 'react-native-reanimated';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth, computeAge, type UserRole } from '@/contexts/AuthContext';
+import { useToast } from '@/contexts/ToastContext';
 import { apiRegister } from '@/utils/api';
 import Button from '@/components/Button';
 import Input from '@/components/Input';
+import BrandMark from '@/components/BrandMark';
 import SelectSheet from '@/components/SelectSheet';
-import BloodGroupBadge from '@/components/BloodGroupBadge';
-import { FontSize, FontWeight, Spacing, BorderRadius } from '@/constants/Typography';
-import { BLOOD_GROUPS, GENDER_OPTIONS, MEDICAL_CONDITIONS, BloodGroup } from '@/constants/BloodData';
+import {
+  BLOOD_GROUPS, GENDER_OPTIONS, MEDICAL_CONDITIONS, type BloodGroup,
+} from '@/constants/BloodData';
+import {
+  FontSize, FontWeight, LetterSpacing, Spacing, Radius, Motion, Elevation,
+} from '@/constants/Typography';
+import { errorReporter } from '@/lib/errorReporter';
 
-type Step = 0 | 1 | 2 | 3;
-const STEPS = ['Your Info', 'Blood & Health', 'Phone', 'Availability'];
+const MIN_DONOR_AGE = 18;
+
+type StepKey =
+  | 'role'
+  | 'identity'
+  | 'dob'
+  | 'blood'
+  | 'medical'
+  | 'contact'
+  | 'confirm';
+
+interface FormState {
+  role:               UserRole | '';
+  fullName:           string;
+  gender:             string;
+  dobDay:             string;
+  dobMonth:           string;
+  dobYear:            string;
+  dobShownPicker:     boolean;
+  dobPickerDate:      Date;
+  bloodGroup:         BloodGroup | '';
+  conditions:         string[];
+  shareMedical:       boolean;
+  phone:              string;
+  whatsapp:           boolean;
+}
+
+const INITIAL_FORM: FormState = {
+  role: '', fullName: '', gender: '',
+  dobDay: '', dobMonth: '', dobYear: '',
+  dobShownPicker: false, dobPickerDate: new Date(2000, 0, 1),
+  bloodGroup: '', conditions: [], shareMedical: false,
+  phone: '', whatsapp: false,
+};
 
 export default function OnboardingScreen() {
-  const { theme }            = useTheme();
+  const { theme }     = useTheme();
   const { user, refreshProfile } = useAuth();
-  const insets               = useSafeAreaInsets();
-  const { width }            = useWindowDimensions();
+  const toast         = useToast();
+  const insets        = useSafeAreaInsets();
+  const { width }     = useWindowDimensions();
 
-  const [step, setStep]       = useState<Step>(0);
+  const [form, setForm]       = useState<FormState>(INITIAL_FORM);
+  const [stepIdx, setStepIdx] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [genderSheet, setGenderSheet] = useState(false);
+  const [errors, setErrors] = useState<Partial<Record<StepKey, string>>>({});
 
-  // Step 0 — Basic info
-  const [fullName, setFullName]                     = useState('');
-  const [gender, setGender]                         = useState('');
-  const [genderVisible, setGenderVisible]           = useState(false);
+  // Role-aware step ordering — donors/both see DOB + medical; recipients skip.
+  const steps = useMemo<StepKey[]>(() => {
+    if (form.role === 'recipient') return ['role', 'identity', 'blood', 'contact', 'confirm'];
+    if (form.role === '')          return ['role'];
+    return ['role', 'identity', 'dob', 'blood', 'medical', 'contact', 'confirm'];
+  }, [form.role]);
 
-  // Step 1 — Blood & medical
-  const [bloodGroup, setBloodGroup]                 = useState<BloodGroup | ''>('');
-  const [conditions, setConditions]                 = useState<string[]>([]);
-  const [shareMedical, setShareMedical]             = useState(false);
+  const stepKey   = steps[stepIdx] ?? 'role';
+  const totalSteps = steps.length;
+  const progress   = Math.round(((stepIdx + 1) / totalSteps) * 100);
 
-  // Step 2 — Phone (saved in DB only, not used for auth)
-  const [phone, setPhone]                           = useState('');
-
-  // Step 3 — Availability
-  const [isAvailable, setIsAvailable]               = useState(true);
-
-  const genderOptions = GENDER_OPTIONS.map((g) => ({ label: g, value: g }));
-
-  const toggleCondition = useCallback((c: string) => {
-    setConditions((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]);
+  const update = useCallback(<K extends keyof FormState>(k: K, v: FormState[K]) => {
+    setForm(prev => ({ ...prev, [k]: v }));
   }, []);
 
-  /* ── Validate current step before advancing ─────────────── */
-  const canAdvance = useCallback((): boolean => {
-    if (step === 0) {
-      if (!fullName.trim()) { Alert.alert('Required', 'Please enter your full name.'); return false; }
-      if (!gender)          { Alert.alert('Required', 'Please select your gender.'); return false; }
-    }
-    if (step === 1) {
-      if (!bloodGroup) { Alert.alert('Required', 'Please select your blood group.'); return false; }
-    }
-    return true;
-  }, [step, fullName, gender, bloodGroup]);
+  const setError = useCallback((k: StepKey, v?: string) => {
+    setErrors(prev => ({ ...prev, [k]: v }));
+  }, []);
 
-  /* ── Final submit ───────────────────────────────────────── */
+  // ── DOB helpers ──────────────────────────────────────────────────────────
+  const dobISO = useCallback((): string | null => {
+    const d = parseInt(form.dobDay, 10);
+    const m = parseInt(form.dobMonth, 10);
+    const y = parseInt(form.dobYear, 10);
+    if (!d || !m || !y || y < 1900 || y > new Date().getFullYear()) return null;
+    if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }, [form.dobDay, form.dobMonth, form.dobYear]);
+
+  const dobAge = useMemo(() => computeAge(dobISO()), [dobISO]);
+
+  const handlePickerChange = (event: DateTimePickerEvent, date?: Date) => {
+    if (event.type === 'dismissed') { update('dobShownPicker', false); return; }
+    if (date) {
+      update('dobPickerDate', date);
+      update('dobDay',   String(date.getDate()));
+      update('dobMonth', String(date.getMonth() + 1));
+      update('dobYear',  String(date.getFullYear()));
+    }
+    if (Platform.OS !== 'ios') update('dobShownPicker', false);
+  };
+
+  // ── Validation per step ──────────────────────────────────────────────────
+  const validate = useCallback((): boolean => {
+    switch (stepKey) {
+      case 'role':
+        if (!form.role) {
+          setError('role', 'Pick how you want to use BludStack');
+          return false;
+        }
+        break;
+      case 'identity':
+        if (form.fullName.trim().length < 2) {
+          setError('identity', 'Tell us the name you go by');
+          return false;
+        }
+        if (!form.gender) {
+          setError('identity', 'Select a gender to continue');
+          return false;
+        }
+        break;
+      case 'dob': {
+        const iso = dobISO();
+        if (!iso) {
+          setError('dob', 'Enter a valid date of birth');
+          return false;
+        }
+        const age = computeAge(iso);
+        if (age === null || age < 1 || age > 120) {
+          setError('dob', 'That date doesn\'t look right');
+          return false;
+        }
+        if ((form.role === 'donor' || form.role === 'both') && age < MIN_DONOR_AGE) {
+          setError('dob', `Donors must be ${MIN_DONOR_AGE} or older — switch to "Receive only" if you'd like to keep going`);
+          return false;
+        }
+        break;
+      }
+      case 'blood':
+        if (!form.bloodGroup) {
+          setError('blood', 'Select your blood group');
+          return false;
+        }
+        break;
+      case 'contact':
+        if (form.phone.trim() && form.phone.replace(/\D/g, '').length < 7) {
+          setError('contact', 'Phone number looks too short');
+          return false;
+        }
+        break;
+    }
+    setError(stepKey, undefined);
+    return true;
+  }, [stepKey, form, dobISO, setError]);
+
+  // ── Submit ───────────────────────────────────────────────────────────────
   const submit = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id || !form.role || !form.bloodGroup) return;
     setLoading(true);
     try {
-      // POST /auth/register — backend enforces the donor age gate and writes
-      // the profile via service_role (RLS blocks the client from setting role
-      // / total_donations / is_verified / push_token directly).
       const { downgraded } = await apiRegister({
-        full_name:              fullName.trim(),
-        blood_group:            bloodGroup as BloodGroup,
-        gender:                 gender || undefined,
-        phone:                  phone.trim() || null,
-        whatsapp_available:     false,
-        medical_conditions:     conditions,
-        share_medical_history:  shareMedical,
-        is_available_to_donate: isAvailable,
-        role:                   isAvailable ? 'donor' : 'recipient',
+        full_name:              form.fullName.trim(),
+        blood_group:            form.bloodGroup,
+        gender:                 form.gender || undefined,
+        date_of_birth:          dobISO(),
+        phone:                  form.phone.trim() || null,
+        whatsapp_available:     form.phone.trim() ? form.whatsapp : false,
+        medical_conditions:     form.role === 'recipient' ? [] : form.conditions,
+        share_medical_history:  form.shareMedical,
+        is_available_to_donate: form.role !== 'recipient',
+        role:                   form.role as UserRole,
       });
 
       if (downgraded) {
-        Alert.alert(
-          'Note',
-          'Donor accounts require age 18+. We set your account up as a recipient. You can still post blood requests anytime.',
-        );
+        toast.warning('Switched to recipient', {
+          description: `Donors must be ${MIN_DONOR_AGE}+. You can still post requests anytime.`,
+          duration: 6000,
+        });
+      } else {
+        toast.success("You're in", { description: 'Welcome to the network.' });
       }
-
       await refreshProfile();
     } catch (e: any) {
-      console.error('Onboarding submit error:', e);
-      Alert.alert('Error saving profile', e?.message ?? 'Please try again.');
+      errorReporter.error(e, { screen: 'onboarding/submit' });
+      toast.error("Couldn't save your profile", {
+        description: e?.message ?? 'Check your connection and try again',
+      });
     } finally {
       setLoading(false);
     }
-  }, [user, fullName, gender, bloodGroup, phone, conditions, shareMedical, isAvailable, refreshProfile]);
+  }, [user, form, dobISO, refreshProfile, toast]);
 
-  const nextStep = useCallback(() => {
-    if (!canAdvance()) return;
-    if (step < 3) setStep((s) => (s + 1) as Step);
-    else          submit();
-  }, [step, canAdvance, submit]);
+  // ── Step navigation ──────────────────────────────────────────────────────
+  const next = useCallback(() => {
+    if (!validate()) return;
+    if (stepIdx < totalSteps - 1) setStepIdx(stepIdx + 1);
+    else                          submit();
+  }, [validate, stepIdx, totalSteps, submit]);
 
-  const maxW = Math.min(width, 520);
+  const back = useCallback(() => {
+    if (stepIdx > 0) setStepIdx(stepIdx - 1);
+  }, [stepIdx]);
+
+  const ctaLabel =
+    stepIdx === totalSteps - 1 ? 'Save and continue'
+    : stepKey === 'role'        ? 'Continue'
+    : 'Next';
 
   return (
     <KeyboardAvoidingView
       style={[styles.root, { backgroundColor: theme.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      {/* Progress bar */}
-      <View style={[styles.progressWrap, { paddingTop: insets.top + Spacing[3], backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
-        <View style={styles.stepsRow}>
-          {STEPS.map((label, i) => (
-            <View key={label} style={styles.stepItem}>
-              <View style={[styles.dot, { backgroundColor: i <= step ? theme.primary : theme.border }]}>
-                <Text style={[styles.dotLabel, { color: i <= step ? '#fff' : theme.textMuted }]}>
-                  {i < step ? '✓' : i + 1}
-                </Text>
-              </View>
-              <Text style={[styles.stepLabel, { color: i === step ? theme.textPrimary : theme.textMuted }]}>
-                {label}
-              </Text>
-            </View>
-          ))}
+      {/* ── Header / progress ────────────────────────────────────────────── */}
+      <View style={[styles.header, { paddingTop: insets.top + Spacing[3] }]}>
+        <View style={styles.headerRow}>
+          {stepIdx > 0 ? (
+            <Pressable onPress={back} hitSlop={8} style={styles.backBtn}>
+              <Ionicons name="chevron-back" size={22} color={theme.textPrimary} />
+            </Pressable>
+          ) : (
+            <BrandMark size={22} />
+          )}
+          <Text style={[styles.stepCount, { color: theme.textMuted }]}>
+            Step {stepIdx + 1} of {totalSteps}
+          </Text>
+          <View style={{ width: 40 }} />
         </View>
-        <View style={[styles.track, { backgroundColor: theme.border }]}>
-          <View style={[styles.fill, { backgroundColor: theme.primary, width: `${((step + 1) / 4) * 100}%` }]} />
+        <View style={[styles.progressTrack, { backgroundColor: theme.border }]}>
+          <View
+            style={[
+              styles.progressFill,
+              { width: `${progress}%`, backgroundColor: theme.primary },
+            ]}
+          />
         </View>
       </View>
 
@@ -143,299 +269,682 @@ export default function OnboardingScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={{ width: maxW, alignSelf: 'center' }}>
-
-          {/* ── Step 0: Basic info ─────────────────────────── */}
-          {step === 0 && (
-            <View style={styles.body}>
-              <Text style={styles.emoji}>👤</Text>
-              <Text style={[styles.title, { color: theme.textPrimary }]}>Tell us about yourself</Text>
-              <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-                Your name and gender help donors and recipients identify and trust each other.
-              </Text>
-
-              {/* Signed-in email (read-only) */}
-              <View style={[styles.emailRow, { backgroundColor: theme.muted, borderColor: theme.border }]}>
-                <Text style={{ fontSize: 16 }}>✉️</Text>
-                <View>
-                  <Text style={[styles.emailLabel, { color: theme.textMuted }]}>Signed in as</Text>
-                  <Text style={[styles.emailValue, { color: theme.textPrimary }]}>{user?.email}</Text>
-                </View>
-              </View>
-
-              <Input
-                label="Full Name"
-                placeholder="e.g. Muhammad Ali"
-                value={fullName}
-                onChangeText={setFullName}
-                leftIcon={<Text>✏️</Text>}
-                autoFocus
-              />
-
-              <TouchableOpacity
-                onPress={() => setGenderVisible(true)}
-                style={[styles.pickerRow, { backgroundColor: theme.inputBg, borderColor: gender ? theme.inputFocus : theme.inputBorder }]}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.pickerLabel, { color: theme.textSecondary }]}>Gender</Text>
-                <Text style={[styles.pickerValue, { color: gender ? theme.textPrimary : theme.textMuted }]}>
-                  {gender || 'Select…'}
-                </Text>
-                <Text style={{ color: theme.textMuted }}>›</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* ── Step 1: Blood & Medical ─────────────────────── */}
-          {step === 1 && (
-            <View style={styles.body}>
-              <Text style={styles.emoji}>🩸</Text>
-              <Text style={[styles.title, { color: theme.textPrimary }]}>Your blood profile</Text>
-              <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-                Used to match you with compatible donors or recipients in seconds.
-              </Text>
-
-              <Text style={[styles.label, { color: theme.textSecondary }]}>Blood Group *</Text>
-              <View style={styles.bloodGrid}>
-                {BLOOD_GROUPS.map((bg) => (
-                  <TouchableOpacity
-                    key={bg}
-                    onPress={() => setBloodGroup(bg)}
-                    style={[
-                      styles.bloodBtn,
-                      {
-                        borderColor:     bloodGroup === bg ? theme.primary : theme.border,
-                        backgroundColor: bloodGroup === bg ? `${theme.primary}18` : theme.card,
-                      },
-                    ]}
-                    activeOpacity={0.8}
-                  >
-                    <BloodGroupBadge bloodGroup={bg} size="md" showGlow={bloodGroup === bg} />
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <Text style={[styles.label, { color: theme.textSecondary, marginTop: Spacing[4] }]}>
-                Medical Conditions{' '}
-                <Text style={{ fontWeight: FontWeight.regular, fontSize: FontSize.xs }}>(optional)</Text>
-              </Text>
-              <Text style={[styles.hint, { color: theme.textMuted }]}>
-                Tap any that apply. Helps ensure safe donations.
-              </Text>
-              <View style={styles.condGrid}>
-                {MEDICAL_CONDITIONS.map((c) => {
-                  const sel = conditions.includes(c);
-                  return (
-                    <TouchableOpacity
-                      key={c}
-                      onPress={() => toggleCondition(c)}
-                      style={[
-                        styles.condChip,
-                        {
-                          backgroundColor: sel ? `${theme.warning}22` : theme.muted,
-                          borderColor:     sel ? theme.warning : theme.border,
-                        },
-                      ]}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={[styles.condText, { color: sel ? theme.warning : theme.textSecondary }]}>
-                        {sel ? '✓ ' : ''}{c}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              {conditions.length > 0 && (
-                <TouchableOpacity
-                  onPress={() => setShareMedical(!shareMedical)}
-                  style={[
-                    styles.shareBox,
-                    { backgroundColor: shareMedical ? `${theme.accent}12` : theme.muted, borderColor: theme.border },
-                  ]}
-                  activeOpacity={0.85}
-                >
-                  <Text style={{ fontSize: 20 }}>{shareMedical ? '👁' : '🔒'}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.shareTitle, { color: theme.textPrimary }]}>
-                      {shareMedical ? 'Sharing medical history' : 'Medical history is private'}
-                    </Text>
-                    <Text style={[styles.shareHint, { color: theme.textMuted }]}>
-                      Tap to {shareMedical ? 'hide' : 'share'} with matched donors/recipients
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-
-          {/* ── Step 2: Phone number ─────────────────────────── */}
-          {step === 2 && (
-            <View style={styles.body}>
-              <Text style={styles.emoji}>📱</Text>
-              <Text style={[styles.title, { color: theme.textPrimary }]}>Add your phone number</Text>
-              <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-                So donors and recipients can call or message you in emergencies.
-                This is optional but strongly recommended.
-              </Text>
-
-              <Input
-                label="Phone Number (optional)"
-                placeholder="+92 300 1234567"
-                keyboardType="phone-pad"
-                value={phone}
-                onChangeText={setPhone}
-                leftIcon={<Text>📞</Text>}
-                hint="Include country code for international format"
-              />
-
-              <View style={[styles.infoBox, { backgroundColor: theme.muted, borderColor: theme.border }]}>
-                <Text style={{ fontSize: 16 }}>ℹ️</Text>
-                <Text style={[styles.infoText, { color: theme.textSecondary }]}>
-                  Your phone number is only shared with matched donors or recipients after they accept a request — never publicly visible.
-                </Text>
-              </View>
-            </View>
-          )}
-
-          {/* ── Step 3: Availability ─────────────────────────── */}
-          {step === 3 && (
-            <View style={styles.body}>
-              <Text style={styles.emoji}>📍</Text>
-              <Text style={[styles.title, { color: theme.textPrimary }]}>Set your availability</Text>
-              <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-                Are you willing to donate blood when someone nearby needs it?
-              </Text>
-
-              {[
-                {
-                  val: true,
-                  icon: '✅',
-                  heading: "Yes, I'm available to donate",
-                  sub:     'Receive notifications when someone nearby needs your blood group.',
-                  accent:  theme.success,
-                },
-                {
-                  val: false,
-                  icon: '⏸️',
-                  heading: 'Not available right now',
-                  sub:     'You can change this anytime from your profile settings.',
-                  accent:  theme.textMuted,
-                },
-              ].map(({ val, icon, heading, sub, accent }) => (
-                <TouchableOpacity
-                  key={String(val)}
-                  onPress={() => setIsAvailable(val)}
-                  style={[
-                    styles.availCard,
-                    {
-                      backgroundColor: isAvailable === val ? `${accent}18` : theme.card,
-                      borderColor:     isAvailable === val ? accent : theme.border,
-                    },
-                  ]}
-                  activeOpacity={0.85}
-                >
-                  <Text style={{ fontSize: 28 }}>{icon}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.availHeading, { color: theme.textPrimary }]}>{heading}</Text>
-                    <Text style={[styles.availSub, { color: theme.textSecondary }]}>{sub}</Text>
-                  </View>
-                  {isAvailable === val && (
-                    <Text style={[styles.check, { color: accent }]}>✓</Text>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-
-          {/* Navigation buttons */}
-          <View style={styles.navRow}>
-            {step > 0 && (
-              <Button
-                label="← Back"
-                variant="ghost"
-                onPress={() => setStep((s) => (s - 1) as Step)}
-                style={{ flex: 1 }}
-              />
-            )}
-            <Button
-              label={step === 3 ? '🩸 Complete Setup' : 'Continue →'}
-              variant="primary"
-              size="lg"
-              onPress={nextStep}
-              loading={loading}
-              style={{ flex: step === 0 ? 1 : 2 }}
+        <Animated.View
+          key={stepKey}
+          entering={SlideInRight.duration(Motion.duration.base)}
+          exiting={SlideOutLeft.duration(Motion.duration.fast)}
+          style={styles.stepWrap}
+        >
+          {stepKey === 'role'     && (
+            <RoleStep
+              value={form.role}
+              error={errors.role}
+              onChange={r => { update('role', r); setError('role', undefined); }}
             />
-          </View>
-        </View>
+          )}
+          {stepKey === 'identity' && (
+            <IdentityStep
+              fullName={form.fullName}
+              gender={form.gender}
+              error={errors.identity}
+              onFullName={t => update('fullName', t)}
+              onPickGender={() => setGenderSheet(true)}
+            />
+          )}
+          {stepKey === 'dob'      && (
+            <DobStep
+              day={form.dobDay} month={form.dobMonth} year={form.dobYear}
+              age={dobAge}
+              error={errors.dob}
+              roleRequiresAge18={form.role === 'donor' || form.role === 'both'}
+              shownPicker={form.dobShownPicker}
+              pickerDate={form.dobPickerDate}
+              onDay={t => update('dobDay', t.replace(/\D/g, '').slice(0, 2))}
+              onMonth={t => update('dobMonth', t.replace(/\D/g, '').slice(0, 2))}
+              onYear={t => update('dobYear', t.replace(/\D/g, '').slice(0, 4))}
+              onOpenPicker={() => update('dobShownPicker', true)}
+              onPickerChange={handlePickerChange}
+            />
+          )}
+          {stepKey === 'blood'    && (
+            <BloodStep
+              value={form.bloodGroup}
+              error={errors.blood}
+              onChange={g => { update('bloodGroup', g); setError('blood', undefined); }}
+            />
+          )}
+          {stepKey === 'medical'  && (
+            <MedicalStep
+              conditions={form.conditions}
+              share={form.shareMedical}
+              onToggleCondition={c => {
+                const next = form.conditions.includes(c)
+                  ? form.conditions.filter(x => x !== c)
+                  : [...form.conditions, c];
+                update('conditions', next);
+              }}
+              onToggleShare={() => update('shareMedical', !form.shareMedical)}
+            />
+          )}
+          {stepKey === 'contact'  && (
+            <ContactStep
+              phone={form.phone} whatsapp={form.whatsapp}
+              error={errors.contact}
+              onPhone={t => update('phone', t)}
+              onToggleWA={() => update('whatsapp', !form.whatsapp)}
+            />
+          )}
+          {stepKey === 'confirm'  && (
+            <ConfirmStep form={form} dobAge={dobAge} />
+          )}
+        </Animated.View>
       </ScrollView>
 
+      {/* ── Bottom CTA ───────────────────────────────────────────────────── */}
+      <View style={[styles.cta, { paddingBottom: insets.bottom + Spacing[4] }]}>
+        <Button
+          label={ctaLabel}
+          onPress={next}
+          loading={loading}
+          fullWidth size="xl"
+          variant="primary"
+        />
+      </View>
+
       <SelectSheet
-        visible={genderVisible}
-        title="Select Gender"
-        options={genderOptions}
-        selected={gender}
-        onSelect={setGender}
-        onClose={() => setGenderVisible(false)}
+        visible={genderSheet}
+        title="Gender"
+        options={GENDER_OPTIONS.map(g => ({ label: g, value: g }))}
+        value={form.gender}
+        onSelect={v => { update('gender', String(v)); setGenderSheet(false); }}
+        onClose={() => setGenderSheet(false)}
       />
     </KeyboardAvoidingView>
   );
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Step components — co-located, theme-aware, no emoji.
+// ──────────────────────────────────────────────────────────────────────────────
+
+function RoleStep({
+  value, error, onChange,
+}: { value: UserRole | ''; error?: string; onChange: (r: UserRole) => void }) {
+  const { theme } = useTheme();
+  const options: { value: UserRole; title: string; body: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+    { value: 'donor',     title: 'I want to donate',          body: "I'm 18+ and ready to give blood when someone nearby needs it.", icon: 'water' },
+    { value: 'recipient', title: 'I need blood',              body: 'I or someone close to me may need a donor.',                    icon: 'medkit' },
+    { value: 'both',      title: 'Both',                      body: 'I can donate, and I want to be able to request if needed.',     icon: 'sync' },
+  ];
+
+  return (
+    <View style={{ gap: Spacing[5] }}>
+      <Text style={titleStyles(theme).title}>How will you use BludStack?</Text>
+      <Text style={titleStyles(theme).subtitle}>Pick what fits today. You can change this later in Settings.</Text>
+
+      <View style={{ gap: Spacing[3], marginTop: Spacing[3] }}>
+        {options.map(opt => {
+          const selected = value === opt.value;
+          return (
+            <Pressable
+              key={opt.value}
+              onPress={() => onChange(opt.value)}
+              style={[
+                roleStyles.card,
+                {
+                  borderColor: selected ? theme.primary : theme.border,
+                  backgroundColor: selected ? theme.primarySoft : theme.cardElevated,
+                },
+                Elevation.xs,
+              ]}
+              accessibilityRole="radio"
+              accessibilityState={{ selected }}
+            >
+              <View
+                style={[
+                  roleStyles.iconPill,
+                  { backgroundColor: selected ? theme.primary : theme.surface },
+                ]}
+              >
+                <Ionicons
+                  name={opt.icon}
+                  size={20}
+                  color={selected ? theme.textOnPrimary : theme.textPrimary}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[roleStyles.cardTitle, { color: theme.textPrimary }]}>{opt.title}</Text>
+                <Text style={[roleStyles.cardBody,  { color: theme.textMuted }]}>{opt.body}</Text>
+              </View>
+              <Ionicons
+                name={selected ? 'radio-button-on' : 'radio-button-off'}
+                size={22}
+                color={selected ? theme.primary : theme.textTertiary}
+              />
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {error && (
+        <Text style={[helperStyle(theme).err, { marginTop: Spacing[1] }]}>{error}</Text>
+      )}
+    </View>
+  );
+}
+
+function IdentityStep({
+  fullName, gender, error, onFullName, onPickGender,
+}: {
+  fullName: string; gender: string; error?: string;
+  onFullName: (s: string) => void; onPickGender: () => void;
+}) {
+  const { theme } = useTheme();
+  return (
+    <View style={{ gap: Spacing[5] }}>
+      <Text style={titleStyles(theme).title}>What should we call you?</Text>
+      <Text style={titleStyles(theme).subtitle}>
+        Donors and recipients see this when they're matched with you.
+      </Text>
+
+      <Input
+        label="Full name"
+        placeholder="e.g. Aashir Athar"
+        value={fullName}
+        onChangeText={onFullName}
+        autoCapitalize="words"
+        autoComplete="name"
+        textContentType="name"
+        returnKeyType="next"
+      />
+
+      <Pressable onPress={onPickGender} accessibilityRole="button" accessibilityLabel="Pick gender">
+        <View pointerEvents="none">
+          <Input
+            label="Gender"
+            placeholder="Select"
+            value={gender}
+            editable={false}
+            rightIcon={<Ionicons name="chevron-down" size={18} color={theme.textMuted} />}
+          />
+        </View>
+      </Pressable>
+
+      {error && <Text style={helperStyle(theme).err}>{error}</Text>}
+    </View>
+  );
+}
+
+function DobStep({
+  day, month, year, age, error, roleRequiresAge18,
+  shownPicker, pickerDate,
+  onDay, onMonth, onYear, onOpenPicker, onPickerChange,
+}: {
+  day: string; month: string; year: string; age: number | null;
+  error?: string; roleRequiresAge18: boolean;
+  shownPicker: boolean; pickerDate: Date;
+  onDay: (t: string) => void; onMonth: (t: string) => void; onYear: (t: string) => void;
+  onOpenPicker: () => void;
+  onPickerChange: (e: DateTimePickerEvent, d?: Date) => void;
+}) {
+  const { theme } = useTheme();
+  const eligible = age !== null && age >= MIN_DONOR_AGE;
+  const showHelper = age !== null;
+
+  return (
+    <View style={{ gap: Spacing[5] }}>
+      <Text style={titleStyles(theme).title}>When were you born?</Text>
+      <Text style={titleStyles(theme).subtitle}>
+        {roleRequiresAge18
+          ? `Donors must be ${MIN_DONOR_AGE} or older. We won't show your full date of birth to anyone.`
+          : "Optional — helps us serve you better. We don't show it to anyone."}
+      </Text>
+
+      <View style={{ flexDirection: 'row', gap: Spacing[3] }}>
+        <View style={{ flex: 1 }}>
+          <Input label="Day"   placeholder="DD" value={day}   onChangeText={onDay}   keyboardType="number-pad" maxLength={2} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Input label="Month" placeholder="MM" value={month} onChangeText={onMonth} keyboardType="number-pad" maxLength={2} />
+        </View>
+        <View style={{ flex: 1.4 }}>
+          <Input label="Year"  placeholder="YYYY" value={year} onChangeText={onYear} keyboardType="number-pad" maxLength={4} />
+        </View>
+      </View>
+
+      <Pressable onPress={onOpenPicker} hitSlop={8} style={{ alignSelf: 'flex-start' }}>
+        <Text style={[helperStyle(theme).link, { color: theme.primary }]}>
+          Or pick a date
+        </Text>
+      </Pressable>
+
+      {shownPicker && (
+        <DateTimePicker
+          value={pickerDate}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          maximumDate={new Date()}
+          minimumDate={new Date(1900, 0, 1)}
+          onChange={onPickerChange}
+        />
+      )}
+
+      {showHelper && (
+        <View
+          style={[
+            dobHelperStyles.pill,
+            {
+              backgroundColor: eligible ? theme.successSoft : theme.warningSoft,
+              borderColor:     eligible ? theme.success     : theme.warning,
+            },
+          ]}
+        >
+          <Ionicons
+            name={eligible ? 'checkmark-circle' : 'warning'}
+            size={16}
+            color={eligible ? theme.success : theme.warning}
+          />
+          <Text style={[dobHelperStyles.text, { color: theme.textPrimary }]}>
+            {`You're ${age}. `}
+            {roleRequiresAge18 && !eligible
+              ? `Donors need to be ${MIN_DONOR_AGE}+ — we'll switch you to recipient.`
+              : 'Looks good.'}
+          </Text>
+        </View>
+      )}
+
+      {error && <Text style={helperStyle(theme).err}>{error}</Text>}
+    </View>
+  );
+}
+
+function BloodStep({
+  value, error, onChange,
+}: { value: BloodGroup | ''; error?: string; onChange: (g: BloodGroup) => void }) {
+  const { theme } = useTheme();
+  return (
+    <View style={{ gap: Spacing[5] }}>
+      <Text style={titleStyles(theme).title}>What's your blood group?</Text>
+      <Text style={titleStyles(theme).subtitle}>
+        We match donors and recipients on compatibility. If you don't know, ask your doctor or check your last donation card.
+      </Text>
+
+      <View style={bloodStyles.grid}>
+        {BLOOD_GROUPS.map(group => {
+          const selected = value === group;
+          return (
+            <Pressable
+              key={group}
+              onPress={() => onChange(group)}
+              style={[
+                bloodStyles.cell,
+                {
+                  borderColor: selected ? theme.primary : theme.border,
+                  backgroundColor: selected ? theme.primary : theme.cardElevated,
+                },
+                Elevation.xs,
+              ]}
+              accessibilityRole="radio"
+              accessibilityState={{ selected }}
+              accessibilityLabel={`Blood group ${group}`}
+            >
+              <Text style={[
+                bloodStyles.label,
+                { color: selected ? theme.textOnPrimary : theme.textPrimary },
+              ]}>
+                {group}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {error && <Text style={helperStyle(theme).err}>{error}</Text>}
+    </View>
+  );
+}
+
+function MedicalStep({
+  conditions, share, onToggleCondition, onToggleShare,
+}: {
+  conditions: string[]; share: boolean;
+  onToggleCondition: (c: string) => void; onToggleShare: () => void;
+}) {
+  const { theme } = useTheme();
+  return (
+    <View style={{ gap: Spacing[5] }}>
+      <Text style={titleStyles(theme).title}>Any conditions a recipient should know about?</Text>
+      <Text style={titleStyles(theme).subtitle}>
+        Tap anything that applies. We only share these with a recipient if you turn sharing on below.
+      </Text>
+
+      <View style={medStyles.wrap}>
+        {MEDICAL_CONDITIONS.map(c => {
+          const selected = conditions.includes(c);
+          return (
+            <Pressable
+              key={c}
+              onPress={() => onToggleCondition(c)}
+              style={[
+                medStyles.chip,
+                {
+                  borderColor: selected ? theme.primary : theme.border,
+                  backgroundColor: selected ? theme.primarySoft : theme.cardElevated,
+                },
+              ]}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: selected }}
+            >
+              {selected && <Ionicons name="checkmark" size={14} color={theme.primary} />}
+              <Text style={[
+                medStyles.chipLabel,
+                { color: selected ? theme.primary : theme.textPrimary },
+              ]}>
+                {c}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <Pressable onPress={onToggleShare} style={[medStyles.shareRow, { borderColor: theme.border }]}>
+        <View style={{ flex: 1 }}>
+          <Text style={[medStyles.shareTitle, { color: theme.textPrimary }]}>
+            Share these with matched recipients
+          </Text>
+          <Text style={[medStyles.shareBody, { color: theme.textMuted }]}>
+            Off by default. Turn on only if you want recipients to see this before you donate.
+          </Text>
+        </View>
+        <View
+          style={[
+            medStyles.toggle,
+            { backgroundColor: share ? theme.primary : theme.cardElevated, borderColor: theme.border },
+          ]}
+        >
+          <View
+            style={[
+              medStyles.toggleDot,
+              { backgroundColor: theme.surface, transform: [{ translateX: share ? 22 : 2 }] },
+            ]}
+          />
+        </View>
+      </Pressable>
+    </View>
+  );
+}
+
+function ContactStep({
+  phone, whatsapp, error, onPhone, onToggleWA,
+}: {
+  phone: string; whatsapp: boolean; error?: string;
+  onPhone: (t: string) => void; onToggleWA: () => void;
+}) {
+  const { theme } = useTheme();
+  return (
+    <View style={{ gap: Spacing[5] }}>
+      <Text style={titleStyles(theme).title}>How can we reach you?</Text>
+      <Text style={titleStyles(theme).subtitle}>
+        Optional. A phone number lets a matched donor or recipient call you when seconds matter.
+      </Text>
+
+      <Input
+        label="Phone (optional)"
+        placeholder="+92 300 1234567"
+        value={phone}
+        onChangeText={onPhone}
+        keyboardType="phone-pad"
+        autoComplete="tel"
+        textContentType="telephoneNumber"
+      />
+
+      <Pressable
+        onPress={onToggleWA}
+        disabled={!phone.trim()}
+        style={[
+          medStyles.shareRow,
+          { borderColor: theme.border, opacity: phone.trim() ? 1 : 0.5 },
+        ]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={[medStyles.shareTitle, { color: theme.textPrimary }]}>
+            I'm on WhatsApp
+          </Text>
+          <Text style={[medStyles.shareBody, { color: theme.textMuted }]}>
+            Lets matched contacts open WhatsApp directly. Calls still work normally.
+          </Text>
+        </View>
+        <View
+          style={[
+            medStyles.toggle,
+            { backgroundColor: whatsapp ? theme.success : theme.cardElevated, borderColor: theme.border },
+          ]}
+        >
+          <View
+            style={[
+              medStyles.toggleDot,
+              { backgroundColor: theme.surface, transform: [{ translateX: whatsapp ? 22 : 2 }] },
+            ]}
+          />
+        </View>
+      </Pressable>
+
+      {error && <Text style={helperStyle(theme).err}>{error}</Text>}
+    </View>
+  );
+}
+
+function ConfirmStep({ form, dobAge }: { form: FormState; dobAge: number | null }) {
+  const { theme } = useTheme();
+  const roleLabel =
+    form.role === 'donor'     ? 'Donor'
+    : form.role === 'recipient' ? 'Recipient'
+    : form.role === 'both'    ? 'Donor and recipient'
+    :                            '—';
+
+  const rows: { label: string; value: string }[] = [
+    { label: 'Role',          value: roleLabel },
+    { label: 'Name',          value: form.fullName || '—' },
+    { label: 'Gender',        value: form.gender   || '—' },
+    ...(form.role !== 'recipient'
+      ? [{ label: 'Date of birth', value: dobAge !== null ? `${dobAge} years` : '—' }]
+      : []),
+    { label: 'Blood group',   value: form.bloodGroup || '—' },
+    { label: 'Phone',         value: form.phone || 'Not shared' },
+    ...(form.role !== 'recipient'
+      ? [{ label: 'Conditions',  value: form.conditions.length ? `${form.conditions.length} disclosed` : 'None' }]
+      : []),
+  ];
+
+  return (
+    <View style={{ gap: Spacing[5] }}>
+      <Text style={titleStyles(theme).title}>Last look — does this look right?</Text>
+      <Text style={titleStyles(theme).subtitle}>
+        Tap back to change anything. You can always edit your profile later.
+      </Text>
+
+      <View
+        style={[
+          confirmStyles.card,
+          { backgroundColor: theme.cardElevated, borderColor: theme.border },
+          Elevation.xs,
+        ]}
+      >
+        {rows.map((r, i) => (
+          <View key={r.label} style={[
+            confirmStyles.row,
+            i < rows.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderColor: theme.divider },
+          ]}>
+            <Text style={[confirmStyles.k, { color: theme.textMuted }]}>{r.label}</Text>
+            <Text style={[confirmStyles.v, { color: theme.textPrimary }]}>{r.value}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Shared styles helpers
+// ──────────────────────────────────────────────────────────────────────────────
+
+const titleStyles = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
+  title: {
+    fontSize: FontSize['2xl'], fontWeight: FontWeight.black,
+    letterSpacing: LetterSpacing.tighter,
+    lineHeight: FontSize['2xl'] * 1.15,
+    color: theme.textPrimary,
+  },
+  subtitle: {
+    fontSize: FontSize.base,
+    lineHeight: FontSize.base * 1.55,
+    color: theme.textMuted,
+  },
+});
+
+const helperStyle = (theme: ReturnType<typeof useTheme>['theme']) => StyleSheet.create({
+  err:  { fontSize: FontSize.sm, color: theme.danger, fontWeight: FontWeight.semibold, marginLeft: Spacing[2] },
+  link: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, letterSpacing: LetterSpacing.snug },
+});
+
 const styles = StyleSheet.create({
-  root:         { flex: 1 },
-  progressWrap: { borderBottomWidth: StyleSheet.hairlineWidth, paddingBottom: Spacing[3], paddingHorizontal: Spacing[5] },
-  stepsRow:     { flexDirection: 'row', justifyContent: 'space-between', marginBottom: Spacing[3] },
-  stepItem:     { alignItems: 'center', gap: 3 },
-  dot:          { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  dotLabel:     { fontSize: FontSize.xs, fontWeight: FontWeight.bold },
-  stepLabel:    { fontSize: 10 },
-  track:        { height: 3, borderRadius: 2, overflow: 'hidden' },
-  fill:         { height: 3, borderRadius: 2 },
-  scroll:       { flexGrow: 1, paddingHorizontal: Spacing[5], paddingTop: Spacing[5] },
-  body:         { gap: Spacing[4] },
-  emoji:        { fontSize: 44, textAlign: 'center' },
-  title:        { fontSize: FontSize['2xl'], fontWeight: FontWeight.bold, textAlign: 'center' },
-  subtitle:     { fontSize: FontSize.sm, textAlign: 'center', lineHeight: 22 },
-  emailRow: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing[3],
-    padding: Spacing[3], borderRadius: BorderRadius.base, borderWidth: 1,
+  root: { flex: 1 },
+  header: {
+    paddingHorizontal: Spacing[5],
+    paddingBottom: Spacing[3],
+    gap: Spacing[3],
   },
-  emailLabel:   { fontSize: FontSize.xs },
-  emailValue:   { fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
-  label:        { fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
-  hint:         { fontSize: FontSize.xs, marginTop: -Spacing[2] },
-  pickerRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    padding: Spacing[4], borderRadius: BorderRadius.base, borderWidth: 1,
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  pickerLabel:  { fontSize: FontSize.sm, fontWeight: FontWeight.medium },
-  pickerValue:  { flex: 1, fontSize: FontSize.base, textAlign: 'right', marginRight: Spacing[2] },
-  bloodGrid:    { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing[2], justifyContent: 'center' },
-  bloodBtn:     { borderRadius: BorderRadius.base, borderWidth: 2, padding: Spacing[2] },
-  condGrid:     { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing[2] },
-  condChip: {
-    paddingHorizontal: Spacing[3], paddingVertical: Spacing[1.5],
-    borderRadius: BorderRadius.full, borderWidth: 1,
+  backBtn: {
+    width: 40, height: 40, borderRadius: Radius.pill,
+    alignItems: 'center', justifyContent: 'center',
   },
-  condText:     { fontSize: FontSize.xs, fontWeight: FontWeight.medium },
-  shareBox: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing[3],
-    padding: Spacing[4], borderRadius: BorderRadius.md, borderWidth: 1,
+  stepCount: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
+    letterSpacing: LetterSpacing.wider,
+    textTransform: 'uppercase',
   },
-  shareTitle:   { fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
-  shareHint:    { fontSize: FontSize.xs, marginTop: 2 },
-  infoBox: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: Spacing[3],
-    padding: Spacing[4], borderRadius: BorderRadius.md, borderWidth: 1,
+  progressTrack: { height: 3, borderRadius: Radius.pill, overflow: 'hidden' },
+  progressFill:  { height: '100%', borderRadius: Radius.pill },
+
+  scroll: { paddingHorizontal: Spacing[5], paddingVertical: Spacing[5] },
+  stepWrap: { gap: Spacing[5] },
+
+  cta: {
+    paddingHorizontal: Spacing[5],
+    paddingTop: Spacing[3],
   },
-  infoText:     { flex: 1, fontSize: FontSize.sm, lineHeight: 20 },
-  availCard: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing[3],
-    padding: Spacing[4], borderRadius: BorderRadius.lg, borderWidth: 2,
+});
+
+const roleStyles = StyleSheet.create({
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[3],
+    padding: Spacing[4],
+    borderRadius: Radius.xl,
+    borderWidth: 1.5,
   },
-  availHeading: { fontSize: FontSize.base, fontWeight: FontWeight.semibold },
-  availSub:     { fontSize: FontSize.xs, marginTop: 2, lineHeight: 18 },
-  check:        { fontSize: FontSize.xl, fontWeight: FontWeight.bold },
-  navRow:       { flexDirection: 'row', gap: Spacing[3], marginTop: Spacing[8] },
+  iconPill: {
+    width: 40, height: 40, borderRadius: Radius.pill,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  cardTitle: {
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.bold,
+    letterSpacing: LetterSpacing.snug,
+  },
+  cardBody: {
+    fontSize: FontSize.sm,
+    marginTop: 2,
+    lineHeight: FontSize.sm * 1.5,
+  },
+});
+
+const bloodStyles = StyleSheet.create({
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing[3],
+  },
+  cell: {
+    width: '22%', minWidth: 76, aspectRatio: 1,
+    alignItems: 'center', justifyContent: 'center',
+    borderRadius: Radius.lg,
+    borderWidth: 1.5,
+  },
+  label: {
+    fontSize: FontSize.xl,
+    fontWeight: FontWeight.black,
+    letterSpacing: LetterSpacing.tight,
+  },
+});
+
+const medStyles = StyleSheet.create({
+  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing[2] },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing[1],
+    paddingVertical: Spacing[2], paddingHorizontal: Spacing[3],
+    borderRadius: Radius.pill,
+    borderWidth: 1.5,
+  },
+  chipLabel: {
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semibold,
+    letterSpacing: LetterSpacing.snug,
+  },
+  shareRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[3],
+    padding: Spacing[4],
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  shareTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.bold,
+    letterSpacing: LetterSpacing.snug,
+  },
+  shareBody: {
+    fontSize: FontSize.xs,
+    marginTop: 2,
+    lineHeight: FontSize.xs * 1.5,
+  },
+  toggle: {
+    width: 48, height: 28, borderRadius: Radius.pill, padding: 2,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  toggleDot: { width: 24, height: 24, borderRadius: 12 },
+});
+
+const confirmStyles = StyleSheet.create({
+  card: {
+    borderRadius: Radius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: Spacing[3],
+    paddingHorizontal: Spacing[4],
+  },
+  k: { fontSize: FontSize.sm, letterSpacing: LetterSpacing.snug },
+  v: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, letterSpacing: LetterSpacing.snug, maxWidth: '60%', textAlign: 'right' },
+});
+
+const dobHelperStyles = StyleSheet.create({
+  pill: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing[2],
+    paddingVertical: Spacing[2], paddingHorizontal: Spacing[3],
+    borderRadius: Radius.pill, borderWidth: StyleSheet.hairlineWidth,
+    alignSelf: 'flex-start',
+  },
+  text: { fontSize: FontSize.sm, fontWeight: FontWeight.semibold },
 });

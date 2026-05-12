@@ -9,8 +9,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/utils/supabase';
-import { apiAcceptRequest, apiDeclineRequest, apiCompleteDonation } from '@/utils/api';
+import { apiAcceptRequest, apiDeclineRequest, apiCompleteDonation, apiCancelRequest } from '@/utils/api';
+import { useToast } from '@/contexts/ToastContext';
 import { BloodRequest, RequestResponse } from '@/hooks/useRequests';
 import { useLocation } from '@/hooks/useLocation';
 import BloodGroupBadge from '@/components/BloodGroupBadge';
@@ -37,6 +39,7 @@ export default function RequestDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { theme, isDark } = useTheme();
   const { user, profile } = useAuth();
+  const toast    = useToast();
   const router   = useRouter();
   const insets   = useSafeAreaInsets();
   const { location } = useLocation(true);
@@ -357,11 +360,28 @@ export default function RequestDetailScreen() {
 
         {/* ── Recipient info (shown to accepted donor) ── */}
         {!isMyRequest && myResponse?.status === 'accepted' && request.recipient && (
-          <Section title="🏥 RECIPIENT" theme={theme}>
+          <Section title="Recipient" theme={theme}>
             <ProfileCard
               profile={request.recipient as any}
               onCall={() => callContact(request.recipient)}
               onMessage={() => messageContact(request.recipient)}
+            />
+            <Button
+              label="Message recipient"
+              variant="secondary"
+              size="lg"
+              fullWidth
+              icon={<Ionicons name="chatbubble-ellipses-outline" size={18} color={theme.textPrimary} />}
+              onPress={() => router.push({
+                pathname: '/chat',
+                params: {
+                  requestId: String(id),
+                  receiverId: (request.recipient as any)?.id ?? request.recipient_id,
+                  receiverName: encodeURIComponent((request.recipient as any)?.full_name ?? 'Recipient'),
+                },
+              } as any)}
+              style={{ marginTop: Spacing[3] }}
+              accessibilityHint="Open chat with the recipient about this request"
             />
           </Section>
         )}
@@ -369,25 +389,41 @@ export default function RequestDetailScreen() {
         {/* ── Accepted donors (shown to request owner) ── */}
         {isMyRequest && acceptedResponses.length > 0 && (
           <Section
-            title={`🩸 ${acceptedResponses.length} DONOR${acceptedResponses.length !== 1 ? 'S' : ''} ACCEPTED`}
+            title={`${acceptedResponses.length} donor${acceptedResponses.length !== 1 ? 's' : ''} accepted`}
             theme={theme}
           >
             {acceptedResponses.map(resp => resp.donor && (
-              <ProfileCard
-                key={resp.id}
-                profile={resp.donor as any}
-                onCall={() => callContact(resp.donor)}
-                onMessage={() => messageContact(resp.donor)}
-              />
+              <View key={resp.id} style={{ gap: Spacing[3], marginBottom: Spacing[3] }}>
+                <ProfileCard
+                  profile={resp.donor as any}
+                  onCall={() => callContact(resp.donor)}
+                  onMessage={() => messageContact(resp.donor)}
+                />
+                <Button
+                  label={`Message ${(resp.donor as any).full_name?.split(' ')[0] ?? 'donor'}`}
+                  variant="secondary"
+                  size="md"
+                  fullWidth
+                  icon={<Ionicons name="chatbubble-ellipses-outline" size={16} color={theme.textPrimary} />}
+                  onPress={() => router.push({
+                    pathname: '/chat',
+                    params: {
+                      requestId: String(id),
+                      receiverId: (resp.donor as any).id,
+                      receiverName: encodeURIComponent((resp.donor as any).full_name ?? 'Donor'),
+                    },
+                  } as any)}
+                />
+              </View>
             ))}
           </Section>
         )}
 
         {/* ── Pending notification count ── */}
         {isMyRequest && isActive && pendingCount > 0 && (
-          <View style={[styles.infoBanner, { backgroundColor: `${theme.warning}12`, borderColor: `${theme.warning}30` }]}>
-            <Text style={styles.infoBannerIcon}>📡</Text>
-            <Text style={[styles.infoBannerText, { color: theme.textSecondary }]}>
+          <View style={[styles.infoBanner, { backgroundColor: theme.warningSoft, borderColor: theme.warning }]}>
+            <Ionicons name="radio" size={18} color={theme.warning} />
+            <Text style={[styles.infoBannerText, { color: theme.textSecondary, marginLeft: Spacing[2] }]}>
               {pendingCount} nearby donor{pendingCount !== 1 ? 's' : ''} notified — awaiting response
             </Text>
           </View>
@@ -398,9 +434,9 @@ export default function RequestDetailScreen() {
           <View style={styles.actionWrap}>
             {/* Incompatibility warning */}
             {!isCompatible && (
-              <View style={[styles.warnBanner, { backgroundColor: `${theme.warning}12`, borderColor: `${theme.warning}30` }]}>
-                <Text style={styles.infoBannerIcon}>⚠️</Text>
-                <Text style={[styles.infoBannerText, { color: theme.textSecondary }]}>
+              <View style={[styles.warnBanner, { backgroundColor: theme.warningSoft, borderColor: theme.warning }]}>
+                <Ionicons name="warning" size={18} color={theme.warning} />
+                <Text style={[styles.infoBannerText, { color: theme.textSecondary, marginLeft: Spacing[2] }]}>
                   Your blood group ({profile?.blood_group}) may not be compatible with {request.blood_group}.
                   Please verify with hospital staff before donating.
                 </Text>
@@ -408,20 +444,38 @@ export default function RequestDetailScreen() {
             )}
 
             {myResponse?.status === 'accepted' ? (
-              /* Already accepted — show confirmation state */
-              <View style={[styles.acceptedState, { backgroundColor: '#00A65112', borderColor: '#00A65130' }]}>
-                <Text style={styles.acceptedEmoji}>✅</Text>
-                <Text style={[styles.acceptedTitle, { color: '#00A651' }]}>You're on the way</Text>
+              /* Already accepted — confirmation state + chat unlock (peak-end) */
+              <View style={[styles.acceptedState, { backgroundColor: theme.successSoft, borderColor: theme.success }]}>
+                <View style={[styles.successBadge, { backgroundColor: theme.success }]}>
+                  <Ionicons name="checkmark" size={22} color={theme.textOnPrimary} />
+                </View>
+                <Text style={[styles.acceptedTitle, { color: theme.success }]}>You're on the way</Text>
                 <Text style={[styles.acceptedSub, { color: theme.textSecondary }]}>
-                  Head to {request.hospital_name} as soon as possible.
-                  The recipient is waiting.
+                  Head to {request.hospital_name} as soon as you can. The recipient knows you're coming.
                 </Text>
                 <Button
-                  label="Open Directions"
+                  label="Open directions"
                   variant="success"
                   onPress={openMaps}
                   fullWidth
-                  size="md"
+                  size="lg"
+                  icon={<Ionicons name="navigate-outline" size={18} color={theme.textOnPrimary} />}
+                />
+                <Button
+                  label="Message recipient"
+                  variant="secondary"
+                  size="lg"
+                  fullWidth
+                  icon={<Ionicons name="chatbubble-ellipses-outline" size={18} color={theme.textPrimary} />}
+                  onPress={() => router.push({
+                    pathname: '/chat',
+                    params: {
+                      requestId: String(id),
+                      receiverId: (request.recipient as any)?.id ?? request.recipient_id,
+                      receiverName: encodeURIComponent((request.recipient as any)?.full_name ?? 'Recipient'),
+                    },
+                  } as any)}
+                  accessibilityHint="Open chat with the recipient about this request"
                 />
               </View>
             ) : myResponse?.status === 'declined' ? (
@@ -430,7 +484,7 @@ export default function RequestDetailScreen() {
                   You declined this request.
                 </Text>
                 <Button
-                  label="Change mind — Accept"
+                  label="Change mind — accept"
                   variant="outline"
                   onPress={handleAccept}
                   loading={actionLoading}
@@ -438,29 +492,29 @@ export default function RequestDetailScreen() {
                 />
               </View>
             ) : (
-              /* Awaiting decision — primary CTA with psychology */
+              /* Awaiting decision — primary CTA with scarcity nudge (loss aversion) */
               <View style={styles.ctaBlock}>
-                {/* Scarcity / urgency nudge */}
-                <View style={[styles.scarcityRow, { backgroundColor: `${urgencyColor}10`, borderColor: `${urgencyColor}25` }]}>
-                  <Text style={[styles.scarcityText, { color: urgencyColor }]}>
-                    {urgencyConfig.icon} Your response can reach this hospital in{' '}
+                <View style={[styles.scarcityRow, { backgroundColor: theme.primarySoft, borderColor: theme.primary }]}>
+                  <Ionicons name="time-outline" size={16} color={urgencyColor} />
+                  <Text style={[styles.scarcityText, { color: urgencyColor, marginLeft: Spacing[2] }]}>
+                    You can reach the hospital in{' '}
                     {distance !== null ? `${estimateDriveMinutes(distance)} min` : 'minutes'}.
                     {acceptedResponses.length === 0 ? ' No donors have accepted yet.' : ''}
                   </Text>
                 </View>
 
                 <Button
-                  label="🩸  Accept & Donate"
+                  label="Accept and donate"
                   variant="primary"
-                  size="lg"
+                  size="xl"
                   onPress={handleAccept}
                   loading={actionLoading}
                   fullWidth
                 />
                 <Button
-                  label="Decline"
+                  label="Not this time"
                   variant="ghost"
-                  size="sm"
+                  size="md"
                   onPress={handleDecline}
                   fullWidth
                 />
@@ -474,47 +528,69 @@ export default function RequestDetailScreen() {
           <View style={styles.actionWrap}>
             {acceptedResponses.length > 0 && (
               <Button
-                label="✅  Mark as Fulfilled"
+                label="Mark as fulfilled"
                 variant="success"
-                size="lg"
+                size="xl"
                 onPress={handleMarkComplete}
                 loading={actionLoading}
                 fullWidth
+                icon={<Ionicons name="checkmark-circle" size={18} color={theme.textOnPrimary} />}
               />
             )}
             <Button
-              label="Cancel Request"
+              label="Cancel this request"
               variant="ghost"
-              size="sm"
+              size="md"
               onPress={() =>
-                Alert.alert('Cancel Request', 'This cannot be undone.', [
-                  { text: 'Keep', style: 'cancel' },
-                  {
-                    text: 'Cancel Request', style: 'destructive',
-                    onPress: async () => {
-                      await supabase
-                        .from('blood_requests')
-                        .update({ status: 'cancelled' })
-                        .eq('id', id);
-                      fetchRequest();
+                Alert.alert(
+                  'Cancel this request?',
+                  'Notified donors will be told. You can post a new request anytime.',
+                  [
+                    { text: 'Keep it active', style: 'cancel' },
+                    {
+                      text: 'Cancel request', style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          await apiCancelRequest(String(id));
+                          toast.info('Request cancelled');
+                          fetchRequest();
+                        } catch (e: any) {
+                          toast.error("Couldn't cancel", { description: e?.message });
+                        }
+                      },
                     },
-                  },
-                ])
+                  ],
+                )
               }
               fullWidth
             />
           </View>
         )}
 
-        {/* ── Closed state ── */}
+        {/* ── Closed state — peak-end framing for fulfilled, neutral for the rest ── */}
         {(isFulfilled || isCancelled || isExpired) && (
-          <View style={[styles.closedBanner, { backgroundColor: theme.cardElevated, borderColor: theme.border }]}>
-            <Text style={[styles.closedText, { color: theme.textMuted }]}>
+          <View
+            style={[
+              styles.closedBanner,
+              isFulfilled
+                ? { backgroundColor: theme.successSoft, borderColor: theme.success }
+                : { backgroundColor: theme.cardElevated, borderColor: theme.border },
+            ]}
+          >
+            <Ionicons
+              name={isFulfilled ? 'heart' : isCancelled ? 'close-circle' : 'time-outline'}
+              size={20}
+              color={isFulfilled ? theme.success : theme.textMuted}
+            />
+            <Text style={[
+              styles.closedText,
+              { color: isFulfilled ? theme.success : theme.textMuted, marginLeft: Spacing[2] },
+            ]}>
               {isFulfilled
-                ? '🎉 This request has been fulfilled. Lives saved!'
+                ? 'This request was fulfilled. A life was saved because of you.'
                 : isCancelled
-                ? '❌ This request was cancelled by the recipient.'
-                : '⏰ This request expired before being fulfilled.'}
+                ? 'This request was cancelled by the recipient.'
+                : 'This request expired before being fulfilled.'}
             </Text>
           </View>
         )}
@@ -623,6 +699,11 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md, borderWidth: 1,
   },
   acceptedEmoji: { fontSize: 40 },
+  successBadge:  {
+    width: 48, height: 48, borderRadius: Radius.pill,
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: Spacing[2],
+  },
   acceptedTitle: { fontSize: FontSize.lg, fontWeight: FontWeight.black },
   acceptedSub:   { fontSize: FontSize.sm, textAlign: 'center', lineHeight: 20 },
 
