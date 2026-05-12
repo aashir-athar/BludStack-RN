@@ -63,7 +63,10 @@ export default function HomeScreen() {
 
   // Psychology: show different CTAs based on state
   const heroMessage = criticalCount > 0
-    ? `${criticalCount} critical request${criticalCount === 1 ? '' : 's'} near you` : compatible.length > 0 ? `${compatible.length} ${profile?.blood_group ?? ''} compatible request${compatible.length === 1 ? '' : 's'} nearby` : `You're all caught up`;
+    ? `${criticalCount} critical request${criticalCount === 1 ? '' : 's'} near you`
+    : compatible.length > 0
+    ? `${compatible.length} ${profile?.blood_group ?? ''} compatible request${compatible.length === 1 ? '' : 's'} nearby`
+    : `You're all caught up`;
 
   return (
     <ScrollView

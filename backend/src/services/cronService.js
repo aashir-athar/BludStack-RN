@@ -70,9 +70,14 @@ async function cleanStalePushTokens() {
  * Health log — periodically log active geo-fencing jobs count.
  * Runs every 5 minutes.
  */
-function logSystemHealth() {
-  const jobs = activeJobCount();
-  console.log(`[cron] health | active geo-fence jobs: ${jobs} | memory: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)} MB`);
+async function logSystemHealth() {
+  try {
+    const jobs = await activeJobCount();
+    const mem  = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+    console.log(`[cron] health | active geo-fence jobs: ${jobs} | memory: ${mem} MB`);
+  } catch (err) {
+    console.error('[cron] logSystemHealth error:', err.message);
+  }
 }
 
 function startCronJobs() {

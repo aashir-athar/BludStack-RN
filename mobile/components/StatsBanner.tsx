@@ -1,8 +1,11 @@
 // components/StatsBanner.tsx
-import React, { useEffect, useState, useCallback } from 'react';
+// Uses the backend's /stats/community endpoint (public, no auth required).
+// Previously summed total_donations client-side by selecting every profile row —
+// RLS now blocks that, and even before RLS it was an O(N) waste of bandwidth.
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useTheme } from '@/contexts/ThemeContext';
-import { supabase } from '@/utils/supabase';
+import { apiCommunityStats } from '@/utils/api';
 import { FontSize, FontWeight, Spacing, Radius, LetterSpacing } from '@/constants/Typography';
 
 const StatsBanner = React.memo(function StatsBanner() {
@@ -10,25 +13,29 @@ const StatsBanner = React.memo(function StatsBanner() {
   const [stats, setStats] = useState({ donations: 0, donors: 0, lives: 0 });
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
-        const [d, a] = await Promise.all([
-          supabase.from('profiles').select('total_donations'),
-          supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('is_available_to_donate', true),
-        ]);
-        const total = (d.data ?? []).reduce((s: number, p: any) => s + (p.total_donations ?? 0), 0);
-        setStats({ donations: total, donors: a.count ?? 0, lives: total * 3 });
-      } catch {}
+        const data: any = await apiCommunityStats();
+        if (cancelled) return;
+        const donations = data?.total_donations ?? data?.donations ?? 0;
+        const donors    = data?.active_donors   ?? data?.donors    ?? 0;
+        const lives     = data?.lives_helped    ?? data?.lives     ?? donations * 3;
+        setStats({ donations, donors, lives });
+      } catch {
+        // Stats are non-critical — silently keep zeros
+      }
     })();
+    return () => { cancelled = true; };
   }, []);
 
   return (
     <View style={[styles.row, { backgroundColor: theme.card, borderColor: theme.border }]}>
-      <Stat label="DONATIONS"    value={stats.donations} color={theme.primary} theme={theme} />
+      <Stat label="DONATIONS"     value={stats.donations} color={theme.primary}     theme={theme} />
       <View style={[styles.sep, { backgroundColor: theme.border }]} />
-      <Stat label="ACTIVE DONORS" value={stats.donors}   color={theme.textPrimary} theme={theme} />
+      <Stat label="ACTIVE DONORS" value={stats.donors}    color={theme.textPrimary} theme={theme} />
       <View style={[styles.sep, { backgroundColor: theme.border }]} />
-      <Stat label="LIVES HELPED" value={stats.lives}     color={theme.success} theme={theme} />
+      <Stat label="LIVES HELPED"  value={stats.lives}     color={theme.success}     theme={theme} />
     </View>
   );
 });

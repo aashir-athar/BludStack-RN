@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/utils/supabase';
+import { apiRegister } from '@/utils/api';
 import Button from '@/components/Button';
 import Input from '@/components/Input';
 import SelectSheet from '@/components/SelectSheet';
@@ -73,28 +73,28 @@ export default function OnboardingScreen() {
     if (!user?.id) return;
     setLoading(true);
     try {
-      const payload = {
-        id:                     user.id,
-        email:                  user.email ?? '',
+      // POST /auth/register — backend enforces the donor age gate and writes
+      // the profile via service_role (RLS blocks the client from setting role
+      // / total_donations / is_verified / push_token directly).
+      const { downgraded } = await apiRegister({
         full_name:              fullName.trim(),
-        gender,
         blood_group:            bloodGroup as BloodGroup,
-        phone:                  phone.trim() || null,       // ← saved but not used for auth
+        gender:                 gender || undefined,
+        phone:                  phone.trim() || null,
+        whatsapp_available:     false,
         medical_conditions:     conditions,
         share_medical_history:  shareMedical,
         is_available_to_donate: isAvailable,
-        total_donations:        0,
-        is_verified:            false,
-        updated_at:             new Date().toISOString(),
-      };
+        role:                   isAvailable ? 'donor' : 'recipient',
+      });
 
-      const { error } = await supabase
-        .from('profiles')
-        .upsert(payload, { onConflict: 'id' });
+      if (downgraded) {
+        Alert.alert(
+          'Note',
+          'Donor accounts require age 18+. We set your account up as a recipient. You can still post blood requests anytime.',
+        );
+      }
 
-      if (error) throw error;
-
-      // Refresh profile in AuthContext — this triggers the redirect to (tabs)
       await refreshProfile();
     } catch (e: any) {
       console.error('Onboarding submit error:', e);

@@ -1,24 +1,29 @@
 // contexts/AuthContext.tsx
 import React, {
   createContext,
-  useContext,
-  useState,
-  useEffect,
   useCallback,
+  useContext,
+  useEffect,
   useMemo,
+  useState,
 } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/utils/supabase';
+import { apiUpdateProfile, ProfilePatch } from '@/utils/api';
+
+export type UserRole = 'donor' | 'recipient' | 'both';
 
 export interface UserProfile {
   id: string;
   full_name: string;
   email: string;
   phone: string | null;
+  whatsapp_available: boolean;
   blood_group: string;
   gender: string;
   date_of_birth: string | null;
   avatar_url: string | null;
+  role: UserRole;
   is_available_to_donate: boolean;
   last_donation_date: string | null;
   total_donations: number;
@@ -32,11 +37,29 @@ export interface UserProfile {
   created_at: string;
 }
 
+export function computeAge(dob: string | null): number | null {
+  if (!dob) return null;
+  const birth = new Date(dob);
+  if (isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return age;
+}
+
+export function canDonateByAge(dob: string | null): boolean {
+  const age = computeAge(dob);
+  return age !== null && age >= 18;
+}
+
 interface AuthContextValue {
   session: Session | null;
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
+  isDonor: boolean;
+  isRecipient: boolean;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
@@ -51,17 +74,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchProfile = useCallback(async (userId: string) => {
     try {
+      // RLS: a user can only SELECT their own profile row (full columns).
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .maybeSingle();          // maybeSingle → returns null (not error) if row missing
+        .maybeSingle();
 
       if (error) {
-        // Log but don't crash — RLS might block if profile not yet created
-        console.warn('Profile fetch warning:', error.message, error.code);
+        console.warn('Profile fetch warning:', error.message);
         return;
       }
+      if (data && !Array.isArray(data.medical_conditions)) data.medical_conditions = [];
+      if (data && !data.role) data.role = 'donor';
       setProfile(data as UserProfile | null);
     } catch (e: any) {
       console.warn('Profile fetch exception:', e?.message);
@@ -72,41 +97,76 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (session?.user?.id) await fetchProfile(session.user.id);
   }, [session, fetchProfile]);
 
+  /**
+   * Updates safe profile fields via backend (PATCH /profiles/me).
+   * Server-managed fields (push_token, role, total_donations, last_donation_date,
+   * is_verified) are filtered out — RLS would reject them anyway.
+   */
   const updateProfile = useCallback(async (updates: Partial<UserProfile>) => {
     if (!session?.user?.id) return;
-    const { error } = await supabase
-      .from('profiles')
-      .update(updates)
-      .eq('id', session.user.id);
-    if (!error) {
-      setProfile((prev) => (prev ? { ...prev, ...updates } : prev));
-    } else {
-      throw error;
+    const patch: ProfilePatch = {};
+    const allowed: (keyof ProfilePatch)[] = [
+      'full_name', 'gender', 'date_of_birth', 'avatar_url',
+      'blood_group', 'medical_conditions', 'share_medical_history',
+      'is_available_to_donate', 'address',
+    ];
+    for (const k of allowed) {
+      if (k in updates) (patch as any)[k] = (updates as any)[k];
     }
+    if (Object.keys(patch).length === 0) return;
+
+    await apiUpdateProfile(patch);
+    setProfile(prev => (prev ? { ...prev, ...patch } as UserProfile : prev));
   }, [session]);
 
   useEffect(() => {
-    // Initial session load
+    let profileChannel: ReturnType<typeof supabase.channel> | null = null;
+
     supabase.auth.getSession().then(({ data: { session: s } }) => {
       setSession(s);
       if (s?.user?.id) {
         fetchProfile(s.user.id).finally(() => setLoading(false));
+        profileChannel = supabase
+          .channel(`profile_${s.user.id}`)
+          .on('postgres_changes', {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'profiles',
+            filter: `id=eq.${s.user.id}`,
+          }, () => fetchProfile(s.user.id))
+          .subscribe();
       } else {
         setLoading(false);
       }
     });
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
       if (s?.user?.id) {
         fetchProfile(s.user.id);
+        if (profileChannel) supabase.removeChannel(profileChannel);
+        profileChannel = supabase
+          .channel(`profile_${s.user.id}_${Date.now()}`)
+          .on('postgres_changes', {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'profiles',
+            filter: `id=eq.${s.user.id}`,
+          }, () => fetchProfile(s.user.id))
+          .subscribe();
       } else {
         setProfile(null);
+        if (profileChannel) {
+          supabase.removeChannel(profileChannel);
+          profileChannel = null;
+        }
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      if (profileChannel) supabase.removeChannel(profileChannel);
+    };
   }, [fetchProfile]);
 
   const signOut = useCallback(async () => {
@@ -115,10 +175,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(null);
   }, []);
 
-  const value = useMemo(
-    () => ({ session, user: session?.user ?? null, profile, loading, signOut, refreshProfile, updateProfile }),
-    [session, profile, loading, signOut, refreshProfile, updateProfile]
-  );
+  const isDonor     = !!(profile && (profile.role === 'donor'     || profile.role === 'both'));
+  const isRecipient = !!(profile && (profile.role === 'recipient' || profile.role === 'both'));
+
+  const value = useMemo(() => ({
+    session,
+    user: session?.user ?? null,
+    profile,
+    loading,
+    isDonor,
+    isRecipient,
+    signOut,
+    refreshProfile,
+    updateProfile,
+  }), [session, profile, loading, isDonor, isRecipient, signOut, refreshProfile, updateProfile]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

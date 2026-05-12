@@ -1,6 +1,6 @@
 // app/_layout.tsx
 import 'react-native-url-polyfill/auto';
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -12,43 +12,60 @@ import LoadingScreen from '@/components/LoadingScreen';
 
 SplashScreen.preventAutoHideAsync();
 
+// Any segment[0] in this set is considered a valid "inside the app" location.
+// Without this, opening a deep link like request/abc on cold start bounces the
+// user to (tabs) — destroying the link target. (Fixes flaw #11.)
+const IN_APP_SEGMENTS = new Set(['(tabs)', 'request', 'donor', 'map', 'chat']);
+
 function RootNavigator() {
   const { theme, isDark } = useTheme();
-  const { loading, session, profile } = useAuth();
+  const { loading, session, profile, isDonor, isRecipient } = useAuth();
   const segments = useSegments();
   const router   = useRouter();
+  const didInitialRedirect = useRef(false);
 
   useEffect(() => {
     if (!loading) SplashScreen.hideAsync();
   }, [loading]);
 
-  // Auth guard — redirect based on login/profile state
   useEffect(() => {
     if (loading) return;
 
-    const inAuth       = segments[0] === '(auth)';
-    const inOnboarding = segments[0] === 'onboarding';
-    const inTabs       = segments[0] === '(tabs)';
+    const seg0 = segments[0];
+    const inAuth       = seg0 === '(auth)';
+    const inOnboarding = seg0 === 'onboarding';
+    const inApp        = seg0 !== undefined && IN_APP_SEGMENTS.has(seg0);
 
     if (!session) {
       if (!inAuth) router.replace('/(auth)');
-    } else if (!profile?.full_name) {
-      if (!inOnboarding) router.replace('/onboarding');
-    } else {
-      if (!inTabs) router.replace('/(tabs)');
+      return;
     }
-  }, [loading, session, profile?.full_name, segments[0]]);
+
+    if (!profile?.full_name) {
+      if (!inOnboarding) router.replace('/onboarding');
+      return;
+    }
+
+    // Logged in + onboarded. Only redirect if the user is somewhere they
+    // shouldn't be (e.g. still on (auth) or onboarding after login).
+    if (!inApp) {
+      if (!didInitialRedirect.current) {
+        didInitialRedirect.current = true;
+        // First landing: recipient-only users go straight to Request tab;
+        // anyone with donor capability gets the home feed.
+        if (isRecipient && !isDonor) router.replace('/(tabs)/request');
+        else                          router.replace('/(tabs)');
+      } else {
+        router.replace('/(tabs)');
+      }
+    }
+  }, [loading, session, profile?.full_name, isDonor, isRecipient, segments[0]]);
 
   if (loading) return <LoadingScreen message="Starting BludStack…" />;
 
   return (
     <>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      {/*
-        In Expo Router v4, ALL screens must be registered unconditionally.
-        Navigation is controlled by the useEffect guard above, not by
-        conditionally rendering Stack.Screen children.
-      */}
       <Stack
         screenOptions={{
           headerShown: false,
@@ -62,6 +79,7 @@ function RootNavigator() {
         <Stack.Screen name="request/[id]" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
         <Stack.Screen name="donor/[id]"   options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
         <Stack.Screen name="map/live"     options={{ headerShown: false, gestureEnabled: false }} />
+        <Stack.Screen name="chat"         options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       </Stack>
     </>
   );

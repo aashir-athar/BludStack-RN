@@ -1,12 +1,24 @@
 // src/controllers/authController.js
 'use strict';
 
-const { supabaseAdmin } = require('../utils/supabaseAdmin');
+const { supabaseAdmin }  = require('../utils/supabaseAdmin');
 const { success, error } = require('../utils/response');
 
+const VALID_ROLES = new Set(['donor', 'recipient', 'both']);
+
+function computeAge(dobISO) {
+  if (!dobISO) return null;
+  const birth = new Date(dobISO);
+  if (isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return age;
+}
+
 /**
- * GET /api/v1/auth/me
- * Returns the authenticated user's profile.
+ * GET /api/v1/auth/me — returns the authenticated user's profile.
  */
 async function getMe(req, res, next) {
   try {
@@ -29,8 +41,17 @@ async function getMe(req, res, next) {
 
 /**
  * POST /api/v1/auth/register
- * Called after first OTP verification to create a full profile.
- * The DB trigger creates the row; this endpoint populates fields.
+ *
+ * Called after first OTP verification to populate the profile row created by
+ * the `on_auth_user_created` trigger. Idempotent — re-running just updates
+ * the same row.
+ *
+ * Server-enforced rules (mirrored in supabase_schema.sql constraints):
+ *   • Donor age gate: any role granting donor capability ('donor' | 'both')
+ *     requires age 18+. Under-18 users are silently downgraded to 'recipient'
+ *     and the response includes a notice.
+ *   • Push token, total_donations, last_donation_date, is_verified are never
+ *     accepted from this payload — they are server-managed.
  */
 async function register(req, res, next) {
   try {
@@ -38,24 +59,44 @@ async function register(req, res, next) {
       full_name,
       gender,
       blood_group,
-      date_of_birth,
-      medical_conditions = [],
-      share_medical_history = false,
+      date_of_birth          = null,
+      phone                  = null,
+      whatsapp_available     = false,
+      medical_conditions     = [],
+      share_medical_history  = false,
       is_available_to_donate = true,
+      role: requestedRole    = 'donor',
     } = req.body;
 
+    let role = VALID_ROLES.has(requestedRole) ? requestedRole : 'donor';
+    let downgraded = false;
+    const age = computeAge(date_of_birth);
+
+    if (role === 'donor' || role === 'both') {
+      if (age === null) {
+        return error(res, 'date_of_birth is required to register as a donor', 400);
+      }
+      if (age < 18) {
+        role = 'recipient';
+        downgraded = true;
+      }
+    }
+
+    const effectiveAvailability = role === 'recipient' ? false : !!is_available_to_donate;
+
     const upsertData = {
-      id:                    req.userId,
-      email:                 req.user.email ?? '',    // ← email from Supabase auth
-      full_name:             full_name.trim(),
-      gender,
+      id:                     req.userId,
+      email:                  req.user.email ?? '',
+      full_name:              full_name.trim(),
+      gender:                 gender ?? null,
       blood_group,
-      date_of_birth:         date_of_birth ?? null,
-      medical_conditions,
-      share_medical_history,
-      is_available_to_donate,
-      total_donations:       0,
-      is_verified:           false,
+      date_of_birth,
+      phone:                  phone ? String(phone).trim() : null,
+      whatsapp_available:     phone ? !!whatsapp_available : false,
+      medical_conditions:     Array.isArray(medical_conditions) ? medical_conditions : [],
+      share_medical_history:  !!share_medical_history,
+      is_available_to_donate: effectiveAvailability,
+      role,
     };
 
     const { data, error: dbErr } = await supabaseAdmin
@@ -66,7 +107,14 @@ async function register(req, res, next) {
 
     if (dbErr) throw dbErr;
 
-    return success(res, data, 'Profile created', 201);
+    return success(
+      res,
+      { profile: data, downgraded },
+      downgraded
+        ? 'Profile created. Donor role requires age 18+, account set up as recipient.'
+        : 'Profile created',
+      201,
+    );
   } catch (err) {
     next(err);
   }
@@ -74,15 +122,12 @@ async function register(req, res, next) {
 
 /**
  * POST /api/v1/auth/logout
- * Invalidates the Supabase session server-side.
+ *
+ * Clears the device's push token so the user stops receiving notifications.
+ * Supabase JWTs are stateless — the client must drop the access token locally.
  */
 async function logout(req, res, next) {
   try {
-    // Supabase doesn't have server-side session invalidation with JWT —
-    // the client clears its token. We log the event and return 200.
-    console.log(`[auth] User ${req.userId} logged out`);
-
-    // Optionally: clear push token so user stops receiving notifications
     await supabaseAdmin
       .from('profiles')
       .update({ push_token: null })

@@ -19,10 +19,17 @@ const notificationRoutes = require('./routes/notifications');
 const donationRoutes     = require('./routes/donations');
 const statsRoutes        = require('./routes/stats');
 
-const { startCronJobs } = require('./services/cronService');
+const { startCronJobs }   = require('./services/cronService');
+const { startWorker }     = require('./services/geoFencingService');
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
+
+// ── Trust proxy (Railway / Render / any reverse proxy) ──────
+// Without this, express-rate-limit shares one bucket across all users behind
+// the proxy. Set to the number of proxies in front of the app; '1' is correct
+// for Railway and Render single-hop deployments.
+app.set('trust proxy', parseInt(process.env.TRUST_PROXY ?? '1', 10));
 
 // ── Security headers ─────────────────────────────────────────
 app.use(helmet({
@@ -45,8 +52,17 @@ app.use(express.json({ limit: '512kb' }));
 app.use(express.urlencoded({ extended: true, limit: '512kb' }));
 
 // ── HTTP logging ─────────────────────────────────────────────
+// Strip query strings from production logs so coordinates (lat/lon) and
+// search filters aren't persisted to log aggregators. Path only.
 if (process.env.NODE_ENV !== 'test') {
-  app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+  if (process.env.NODE_ENV === 'production') {
+    morgan.token('path-only', (req) => {
+      try { return req.originalUrl.split('?')[0]; } catch { return req.url; }
+    });
+    app.use(morgan(':remote-addr - :method :path-only :status :res[content-length] - :response-time ms'));
+  } else {
+    app.use(morgan('dev'));
+  }
 }
 
 // ── Global rate limiter ───────────────────────────────────────
@@ -66,18 +82,6 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// ── TEMPORARY: Debug env vars — REMOVE AFTER FIXING ──────────
-app.get('/debug-env', (_req, res) => {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-  res.json({
-    SUPABASE_URL: process.env.SUPABASE_URL || '❌ missing',
-    SERVICE_ROLE_KEY_SET: !!key,
-    SERVICE_ROLE_KEY_LENGTH: key.length,
-    SERVICE_ROLE_KEY_PREVIEW: key ? `${key.slice(0, 20)}...${key.slice(-10)}` : '❌ missing',
-    NODE_ENV: process.env.NODE_ENV,
-  });
-});
-
 // ── API routes ────────────────────────────────────────────────
 app.use('/api/v1/auth',          authRoutes);
 app.use('/api/v1/profiles',      profileRoutes);
@@ -94,14 +98,22 @@ app.use((_req, res) => {
 // ── Global error handler ─────────────────────────────────────
 app.use(errorHandler);
 
-// ── Start server ─────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`\n🩸 BludStack API running on port ${PORT}`);
-  console.log(`   Health: http://localhost:${PORT}/health`);
-  console.log(`   Env:    ${process.env.NODE_ENV || 'development'}\n`);
+// ── Start server (only outside Vercel) ───────────────────────
+// Vercel runs each invocation as a short-lived serverless function. A
+// long-running setInterval-based worker would be killed by the runtime, so on
+// Vercel we expose the tick + cron logic through /api/cron/* HTTPS endpoints
+// that Vercel Cron Jobs hit on a schedule. See vercel.json.
+const IS_VERCEL = !!process.env.VERCEL;
 
-  // Start background cron jobs
-  startCronJobs();
-});
+if (!IS_VERCEL && require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`\n🩸 BludStack API running on port ${PORT}`);
+    console.log(`   Health: http://localhost:${PORT}/health`);
+    console.log(`   Env:    ${process.env.NODE_ENV || 'development'}\n`);
 
-module.exports = app; // for testing
+    startCronJobs();
+    startWorker();
+  });
+}
+
+module.exports = app;
