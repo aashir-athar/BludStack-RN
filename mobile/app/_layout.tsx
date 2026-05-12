@@ -102,8 +102,19 @@ function RootNavigator() {
   const navReady = !loading && !!session && !!profile?.full_name;
   useNotificationDeepLinks(navReady);
 
+  // Hide the native splash exactly ONCE per app lifetime. SDK 54's splash
+  // screen module unregisters itself on the first hideAsync(); calling it
+  // again throws "No native splash screen registered for given view
+  // controller". Without the ref guard, every loading flip
+  // (sign-out → re-auth, profile refresh, etc.) re-triggers this effect
+  // and the second call fails loudly.
+  const splashHiddenRef = useRef(false);
   useEffect(() => {
-    if (!loading) SplashScreen.hideAsync();
+    if (loading || splashHiddenRef.current) return;
+    splashHiddenRef.current = true;
+    // Swallow rejection — if some other code path raced us to it, the
+    // splash is already gone and the user-visible behaviour is identical.
+    SplashScreen.hideAsync().catch(() => {});
   }, [loading]);
 
   // ── App flow (single source of truth) ─────────────────────────────────

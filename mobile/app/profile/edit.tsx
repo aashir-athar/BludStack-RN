@@ -43,6 +43,7 @@ import {
 import { errorReporter } from '@/lib/errorReporter';
 
 const MIN_DONOR_AGE = 18;
+const MAX_DONOR_AGE = 65;
 
 // Sheet entrance — identical physics to Request screen and onboarding.
 function useSheetEntrance() {
@@ -187,6 +188,7 @@ export default function ProfileEditScreen() {
     if (phone.trim() && phone.replace(/\D/g, '').length < 7) return 'Phone number looks too short';
     if (role === 'donor' || role === 'both') {
       if (!age || age < MIN_DONOR_AGE) return `Donors must be ${MIN_DONOR_AGE} or older`;
+      if (age > MAX_DONOR_AGE)         return `Donors must be ${MAX_DONOR_AGE} or younger`;
     }
     return null;
   }, [fullName, bloodGroup, phone, role, age]);
