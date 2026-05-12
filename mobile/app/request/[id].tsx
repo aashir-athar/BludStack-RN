@@ -10,6 +10,7 @@ import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/utils/supabase';
+import { apiAcceptRequest, apiDeclineRequest, apiCompleteDonation } from '@/utils/api';
 import { BloodRequest, RequestResponse } from '@/hooks/useRequests';
 import { useLocation } from '@/hooks/useLocation';
 import BloodGroupBadge from '@/components/BloodGroupBadge';
@@ -131,77 +132,34 @@ export default function RequestDetailScreen() {
     return () => { supabase.removeChannel(channel); };
   }, [id]); // stable — fetchRequest/fetchResponses are stable via useCallback with no-dep pattern
 
-  // ── ACCEPT: fixed bug — use INSERT with onConflict DO UPDATE ──────────────
+  // ── ACCEPT: backend RPC validates cooldown + capacity atomically (flaw #8) ──
   const handleAccept = useCallback(async () => {
     if (!user?.id || !id) return;
     setActionLoading(true);
     try {
-      // Step 1: Check if a row already exists
-      const { data: existing } = await supabase
-        .from('request_responses')
-        .select('id, status')
-        .eq('request_id', id)
-        .eq('donor_id', user.id)
-        .maybeSingle();
-
-      let opError;
-
-      if (existing) {
-        // Row exists — just update the status
-        const { error } = await supabase
-          .from('request_responses')
-          .update({ status: 'accepted' })
-          .eq('id', existing.id);
-        opError = error;
-      } else {
-        // No row — insert fresh
-        const { error } = await supabase
-          .from('request_responses')
-          .insert({ request_id: id, donor_id: user.id, status: 'accepted' });
-        opError = error;
-      }
-
-      if (opError) throw opError;
-
+      await apiAcceptRequest(id);
       await fetchResponses();
-      await fetchRequest(); // refresh request status
-
+      await fetchRequest();
       Alert.alert(
         '🩸 Request Accepted!',
         `You have committed to donating. The recipient will be notified. Please head to the hospital immediately.`,
-        [{ text: 'Get Directions', onPress: openMaps }, { text: 'OK', style: 'cancel' }]
+        [{ text: 'Get Directions', onPress: openMaps }, { text: 'OK', style: 'cancel' }],
       );
     } catch (e: any) {
-      Alert.alert('Failed to accept', e.message ?? 'Please check your connection and try again.');
+      Alert.alert('Failed to accept', e?.message ?? 'Please check your connection and try again.');
     } finally {
       setActionLoading(false);
     }
-  }, [user?.id, id, fetchResponses, fetchRequest]);
+  }, [user?.id, id, fetchResponses, fetchRequest, openMaps]);
 
   const handleDecline = useCallback(async () => {
     if (!user?.id || !id) return;
     setActionLoading(true);
     try {
-      const { data: existing } = await supabase
-        .from('request_responses')
-        .select('id')
-        .eq('request_id', id)
-        .eq('donor_id', user.id)
-        .maybeSingle();
-
-      if (existing) {
-        await supabase
-          .from('request_responses')
-          .update({ status: 'declined' })
-          .eq('id', existing.id);
-      } else {
-        await supabase
-          .from('request_responses')
-          .insert({ request_id: id, donor_id: user.id, status: 'declined' });
-      }
+      await apiDeclineRequest(id);
       await fetchResponses();
     } catch (e: any) {
-      console.warn('[handleDecline]', e.message);
+      console.warn('[handleDecline]', e?.message);
     } finally {
       setActionLoading(false);
     }
@@ -209,6 +167,11 @@ export default function RequestDetailScreen() {
 
   const handleMarkComplete = useCallback(async () => {
     if (!id || !user?.id) return;
+    const accepted = responses.find(r => r.status === 'accepted');
+    if (!accepted?.donor_id) {
+      Alert.alert('No donor yet', 'A donor must accept this request before you can mark it fulfilled.');
+      return;
+    }
     Alert.alert(
       'Mark as Fulfilled?',
       'This will close the request and record the donation.',
@@ -219,40 +182,19 @@ export default function RequestDetailScreen() {
           onPress: async () => {
             setActionLoading(true);
             try {
-              await supabase
-                .from('blood_requests')
-                .update({ status: 'fulfilled' })
-                .eq('id', id);
-
-              const accepted = responses.find(r => r.status === 'accepted');
-              if (accepted?.donor_id) {
-                const { data: dp } = await supabase
-                  .from('profiles')
-                  .select('total_donations')
-                  .eq('id', accepted.donor_id)
-                  .single();
-
-                await Promise.all([
-                  supabase.from('profiles').update({
-                    total_donations:    (dp?.total_donations ?? 0) + 1,
-                    last_donation_date: new Date().toISOString(),
-                  }).eq('id', accepted.donor_id),
-                  supabase.from('request_responses')
-                    .update({ status: 'completed' })
-                    .eq('id', accepted.id),
-                ]);
-              }
-
+              // Backend RPC: atomic flip request→fulfilled + response→completed
+              // + donor.total_donations++ + donor.last_donation_date=now. Idempotent.
+              await apiCompleteDonation(id, accepted.donor_id);
               await fetchRequest();
               Alert.alert('🎉 Life Saved!', 'Donation recorded. Thank you for using BludStack.');
             } catch (e: any) {
-              Alert.alert('Error', e.message);
+              Alert.alert('Error', e?.message ?? 'Failed to mark fulfilled.');
             } finally {
               setActionLoading(false);
             }
           },
         },
-      ]
+      ],
     );
   }, [id, user?.id, responses, fetchRequest]);
 

@@ -1,10 +1,17 @@
 // hooks/useNotifications.ts
-import { useEffect, useCallback } from 'react';
+// ─────────────────────────────────────────────────────────────────────────────
+// After RLS, mobile cannot UPDATE its own profiles.push_token directly — that
+// column is server-managed. Tokens are registered via PUT /notifications/token.
+// (Fixes flaw #1 / #2 — the mobile no longer ever needs to read or write any
+// user's push_token directly against Supabase.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { useCallback, useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import { supabase } from '@/utils/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { apiRegisterPushToken } from '@/utils/api';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -16,10 +23,6 @@ Notifications.setNotificationHandler({
   }),
 });
 
-/**
- * Resolve EAS projectId from app config.
- * Works in Expo Go, development builds, and production EAS builds.
- */
 function getProjectId(): string | undefined {
   return (
     Constants.expoConfig?.extra?.eas?.projectId ??
@@ -65,39 +68,30 @@ export function useNotifications() {
         });
       }
 
-      // 3. Get push token
-      // projectId is required in Expo SDK 51+.
-      // In Expo Go without an EAS project it will fail — that is safe and expected.
+      // 3. Get push token (Expo Go without EAS projectId will fail — expected)
       const projectId = getProjectId();
       let pushToken: string;
       try {
         const tokenData = await Notifications.getExpoPushTokenAsync(
-          projectId ? { projectId } : undefined
+          projectId ? { projectId } : undefined,
         );
         pushToken = tokenData.data;
-      } catch (tokenErr: any) {
-        // Happens in Expo Go when no projectId is configured.
-        // App continues to work normally — only push notifications are unavailable.
+      } catch {
         console.warn(
-          '[notifications] Push token unavailable — this is normal in Expo Go.\n' +
-          'Fix: run `eas init` then add the projectId to app.json > extra.eas.projectId'
+          '[notifications] Push token unavailable — normal in Expo Go.\n' +
+          'Fix: `eas init` then add the projectId to app.json > extra.eas.projectId',
         );
         return;
       }
 
-      // 4. Persist token to Supabase
-      const { error } = await supabase
-        .from('profiles')
-        .update({ push_token: pushToken })
-        .eq('id', user.id);
-
-      if (error) {
-        console.warn('[notifications] Failed to save push token to DB:', error.message);
-      } else {
+      // 4. Register with backend (RLS blocks direct profiles.push_token writes)
+      try {
+        await apiRegisterPushToken(pushToken);
         console.log('[notifications] Push token registered');
+      } catch (e: any) {
+        console.warn('[notifications] Backend rejected token:', e?.message);
       }
     } catch (e: any) {
-      // Never crash the app over push token issues
       console.warn('[notifications] Unexpected error:', e?.message ?? e);
     }
   }, [user]);
