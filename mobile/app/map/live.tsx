@@ -10,7 +10,8 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
+import { Map as MapLibreMap, Camera, type CameraRef, Marker as MlMarker, UserLocation, GeoJSONSource, Layer } from '@maplibre/maplibre-react-native';
+import { getMapStyleJSON, zoomFromRadiusKm } from '@/utils/mapStyles';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
@@ -22,7 +23,7 @@ import { apiUpdateLocation } from '@/utils/api';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import { FontSize, FontWeight, Spacing, BorderRadius } from '@/constants/Typography';
-import { haversineDistance, formatDistance, estimateDriveMinutes, deltaFromKm } from '@/utils/geo';
+import { haversineDistance, formatDistance, estimateDriveMinutes } from '@/utils/geo';
 
 interface DonorLocation {
   id: string;
@@ -39,7 +40,7 @@ export default function LiveMapScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const mapRef = useRef<MapView>(null);
+  const cameraRef = useRef<CameraRef | null>(null);
 
   const [myLocation, setMyLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [donors, setDonors] = useState<DonorLocation[]>([]);
@@ -138,12 +139,25 @@ export default function LiveMapScreen() {
     };
   }, [startWatching, loadRequest, loadDonors]);
 
+  // MapLibre v10 frames a bounding box via
+  //   Camera.fitBounds([west, south, east, north], { padding, duration }).
+  // We pre-compute the bounding rectangle from every point we want visible
+  // (user, hospital, donors) and add a small inset on all sides.
   const fitToMarkers = useCallback(() => {
-    if (!mapRef.current) return;
-    const coords = [myLocation, requestLocation, ...donors.map((d) => ({ latitude: d.latitude, longitude: d.longitude }))]
-      .filter(Boolean) as any[];
-    if (coords.length < 2) return;
-    mapRef.current.fitToCoordinates(coords, { edgePadding: { top: 80, right: 40, bottom: 80, left: 40 }, animated: true });
+    if (!cameraRef.current) return;
+    const points = [myLocation, requestLocation, ...donors.map((d) => ({ latitude: d.latitude, longitude: d.longitude }))]
+      .filter(Boolean) as { latitude: number; longitude: number }[];
+    if (points.length < 2) return;
+    const lats = points.map(p => p.latitude);
+    const lons = points.map(p => p.longitude);
+    const west  = Math.min(...lons);
+    const south = Math.min(...lats);
+    const east  = Math.max(...lons);
+    const north = Math.max(...lats);
+    cameraRef.current.fitBounds(
+      [west, south, east, north],
+      { padding: { top: 80, right: 40, bottom: 80, left: 40 }, duration: 600 },
+    );
   }, [myLocation, requestLocation, donors]);
 
   const openGoogleMaps = useCallback(() => {
@@ -193,57 +207,80 @@ export default function LiveMapScreen() {
       </View>
 
       {/* Map */}
-      <MapView
-        ref={mapRef}
+      <MapLibreMap
         style={styles.map}
-        provider={PROVIDER_DEFAULT}
-        userInterfaceStyle={isDark ? 'dark' : 'light'}
-        showsUserLocation
-        showsMyLocationButton={false}
-        region={{
-          latitude: center.latitude,
-          longitude: center.longitude,
-          latitudeDelta: deltaFromKm(10),
-          longitudeDelta: deltaFromKm(10),
-        }}
+        mapStyle={getMapStyleJSON(isDark)}
       >
+        <Camera
+          ref={cameraRef}
+          initialViewState={{
+            center: [center.longitude, center.latitude],
+            zoom: zoomFromRadiusKm(10),
+          }}
+        />
+        {/* Native location dot for the viewer's own position. */}
+        <UserLocation animated />
+
         {/* Hospital / Request marker */}
         {requestLocation && (
-          <Marker
-            coordinate={{ latitude: requestLocation.latitude, longitude: requestLocation.longitude }}
-            title={requestLocation.hospital}
-            description="Destination"
+          <MlMarker
+            lngLat={[requestLocation.longitude, requestLocation.latitude]}
+            anchor="bottom"
           >
             <View style={[styles.hospitalMarker, { backgroundColor: theme.primary }]}>
               <Ionicons name="medical" size={18} color={theme.textOnPrimary} />
             </View>
-          </Marker>
+          </MlMarker>
         )}
 
         {/* Donor markers (for recipient view) */}
         {donors.map((donor) => (
-          <Marker
+          <MlMarker
             key={donor.id}
-            coordinate={{ latitude: donor.latitude, longitude: donor.longitude }}
-            title={donor.full_name}
-            description={`${donor.blood_group} · Moving to hospital`}
+            lngLat={[donor.longitude, donor.latitude]}
+            anchor="center"
           >
             <View style={[styles.donorMarker, { backgroundColor: theme.primary }]}>
               <Ionicons name="water" size={16} color={theme.textOnPrimary} />
             </View>
-          </Marker>
+          </MlMarker>
         ))}
 
-        {/* Route line (donor to hospital) */}
+        {/* Route line (donor to hospital) — MapLibre v10 GeoJSON source +
+            line layer pair. Paint props follow the MapLibre style spec
+            (kebab-case keys). lineDasharray is in line-width multiples. */}
         {role === 'donor' && myLocation && requestLocation && (
-          <Polyline
-            coordinates={[myLocation, requestLocation]}
-            strokeColor={theme.primary}
-            strokeWidth={2.5}
-            lineDashPattern={[6, 4]}
-          />
+          <GeoJSONSource
+            id="route-src"
+            data={{
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'LineString',
+                coordinates: [
+                  [myLocation.longitude, myLocation.latitude],
+                  [requestLocation.longitude, requestLocation.latitude],
+                ],
+              },
+            }}
+          >
+            <Layer
+              id="route-line"
+              type="line"
+              source="route-src"
+              paint={{
+                'line-color': theme.primary,
+                'line-width': 2.5,
+                'line-dasharray': [3, 2],
+              }}
+              layout={{
+                'line-cap': 'round',
+                'line-join': 'round',
+              }}
+            />
+          </GeoJSONSource>
         )}
-      </MapView>
+      </MapLibreMap>
 
       {/* Bottom panel */}
       <View style={[styles.bottomPanel, { backgroundColor: theme.surface, borderTopColor: theme.border, paddingBottom: insets.bottom + Spacing[4] }]}>

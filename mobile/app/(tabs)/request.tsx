@@ -31,7 +31,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import MapView, { Marker, PROVIDER_DEFAULT, type Region } from 'react-native-maps';
+import { Map as MapLibreMap, Camera, type CameraRef, Marker as MlMarker, UserLocation } from '@maplibre/maplibre-react-native';
+import { getMapStyleJSON, zoomFromRadiusKm } from '@/utils/mapStyles';
 import * as Location from 'expo-location';
 import * as Haptics from 'expo-haptics';
 import Animated, {
@@ -53,7 +54,7 @@ import {
   FontSize, FontWeight, LetterSpacing, Spacing, Radius, Elevation, Motion,
   TAB_BAR_HEIGHT,
 } from '@/constants/Typography';
-import { deltaFromKm, formatDistance } from '@/utils/geo';
+import { formatDistance } from '@/utils/geo';
 import { apiNearbyDonors } from '@/utils/api';
 import { errorReporter } from '@/lib/errorReporter';
 
@@ -271,7 +272,8 @@ export default function RequestScreen() {
   const [loading, setLoading]   = useState(false);
 
   // Pin + reverse geocoding
-  const mapRef = useRef<MapView | null>(null);
+  // MapLibre Camera ref — drives programmatic recentering / fly-to.
+  const cameraRef = useRef<CameraRef | null>(null);
   const [pin, setPin] = useState<{ latitude: number; longitude: number } | null>(null);
   const [geoLoading, setGeoLoading] = useState(false);
   const [userAddress, setUserAddress] = useState<string | null>(null);
@@ -358,20 +360,27 @@ export default function RequestScreen() {
     return () => { cancelled = true; };
   }, [pin?.latitude, pin?.longitude, bloodGroup]);
 
-  // Map interactions
-  const onMapPress = useCallback((e: any) => {
-    const { latitude, longitude } = e.nativeEvent.coordinate;
+  // Map interactions. MapLibre v11's onPress hands us a NativeSyntheticEvent
+  // whose `nativeEvent.lngLat` is a [longitude, latitude] tuple — opposite
+  // order vs react-native-maps' {latitude, longitude}, so unpack explicitly
+  // to avoid silent lon/lat swaps.
+  const onMapPress = useCallback((event: any) => {
+    const lngLat = event?.nativeEvent?.lngLat;
+    if (!Array.isArray(lngLat) || lngLat.length < 2) return;
+    const [longitude, latitude] = lngLat;
     Haptics.selectionAsync().catch(() => {});
     setPin({ latitude, longitude });
   }, []);
   const onRecentre = useCallback(async () => {
     await refreshLocation();
-    if (location && mapRef.current) {
-      mapRef.current.animateToRegion(
-        { latitude: location.latitude, longitude: location.longitude,
-          latitudeDelta: deltaFromKm(1), longitudeDelta: deltaFromKm(1) },
-        Motion.duration.base,
-      );
+    if (location && cameraRef.current) {
+      // MapLibre v11's CameraRef exposes flyTo/jumpTo/easeTo — `setCamera`
+      // (from the old react-native-maps API) is gone.
+      cameraRef.current.flyTo({
+        center:   [location.longitude, location.latitude],
+        zoom:     zoomFromRadiusKm(1),
+        duration: Motion.duration.base,
+      });
       setPin({ latitude: location.latitude, longitude: location.longitude });
     }
   }, [refreshLocation, location]);
@@ -402,12 +411,12 @@ export default function RequestScreen() {
     } finally { setLoading(false); }
   }, [pin, hospital, hospAddr, bloodGroup, urgency, units, notes, createRequest, toast, router]);
 
-  // Initial region
-  const initialRegion: Region | undefined = pin
-    ? { ...pin, latitudeDelta: deltaFromKm(2), longitudeDelta: deltaFromKm(2) }
+  // Initial centre. MapLibre takes a [lon, lat] pair + zoomLevel, not the
+  // {latitude, longitude, *Delta} region object react-native-maps used.
+  const initialRegion: { latitude: number; longitude: number } | undefined = pin
+    ? pin
     : location
-      ? { latitude: location.latitude, longitude: location.longitude,
-          latitudeDelta: deltaFromKm(2), longitudeDelta: deltaFromKm(2) }
+      ? { latitude: location.latitude, longitude: location.longitude }
       : undefined;
 
   const submitDisabled = !pin || !hospital.trim() || !hospAddr.trim() || loading;
@@ -437,46 +446,46 @@ export default function RequestScreen() {
       {/* ───────────────────────── MAP (DECIDE) ─────────────────────────── */}
       <View style={[styles.mapWrap, { height: mapHeight }]}>
         {initialRegion && (
-          <MapView
-            ref={mapRef}
+          <MapLibreMap
             style={StyleSheet.absoluteFill}
-            provider={PROVIDER_DEFAULT}
-            userInterfaceStyle={isDark ? 'dark' : 'light'}
-            initialRegion={initialRegion}
+            mapStyle={getMapStyleJSON(isDark)}
             onPress={onMapPress}
-            onLongPress={onMapPress}
-            showsUserLocation
-            showsMyLocationButton={false}
           >
-            {/* Pulsing donor dots — proof of liveness */}
+            <Camera
+              ref={cameraRef}
+              initialViewState={{
+                center: [initialRegion.longitude, initialRegion.latitude],
+                zoom:   zoomFromRadiusKm(2),
+              }}
+            />
+            {/* Native location dot — MapLibre handles permission + updates. */}
+            <UserLocation animated />
+
+            {/* Pulsing donor dots — proof of liveness. MapLibre uses [lon,lat]. */}
             {nearbyDonors.map(d => (
-              <Marker
+              <MlMarker
                 key={d.id}
-                coordinate={{ latitude: d.lat, longitude: d.lon }}
-                anchor={{ x: 0.5, y: 0.5 }}
-                tracksViewChanges={false}
+                lngLat={[d.lon, d.lat]}
+                anchor="center"
               >
                 <PulseDot color={theme.primary} />
-              </Marker>
+              </MlMarker>
             ))}
-            {/* Oversized hospital pin (Uber: ambiguity = cancellations) */}
+
+            {/* Oversized hospital pin. MapLibre's Marker doesn't ship a
+                native drag handler — the existing tap-to-move flow + the
+                "Tap to move pin" hint already cover relocation. */}
             {pin && (
-              <Marker
-                coordinate={pin}
-                draggable
-                anchor={{ x: 0.5, y: 1 }}
-                onDragEnd={e => {
-                  const { latitude, longitude } = e.nativeEvent.coordinate;
-                  Haptics.selectionAsync().catch(() => {});
-                  setPin({ latitude, longitude });
-                }}
+              <MlMarker
+                lngLat={[pin.longitude, pin.latitude]}
+                anchor="bottom"
               >
                 <View style={[styles.bigPin, { backgroundColor: theme.primary, borderColor: theme.surface }]}>
                   <Ionicons name="medical" size={18} color={theme.textOnPrimary} />
                 </View>
-              </Marker>
+              </MlMarker>
             )}
-          </MapView>
+          </MapLibreMap>
         )}
 
         {/* Top-right recenter pill */}

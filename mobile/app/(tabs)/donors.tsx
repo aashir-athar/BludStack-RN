@@ -9,7 +9,8 @@ import {
   View, Text, StyleSheet, Pressable, useWindowDimensions, RefreshControl,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
-import MapView, { Marker, Circle, PROVIDER_DEFAULT } from 'react-native-maps';
+import { Map as MapLibreMap, Camera, Marker as MlMarker, UserLocation } from '@maplibre/maplibre-react-native';
+import { getMapStyleJSON, zoomFromRadiusKm } from '@/utils/mapStyles';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,7 +26,6 @@ import {
   TAB_BAR_BOTTOM_INSET, Elevation,
 } from '@/constants/Typography';
 import { BLOOD_GROUPS, type UrgencyLevel } from '@/constants/BloodData';
-import { deltaFromKm } from '@/utils/geo';
 
 type ViewMode = 'list' | 'map';
 
@@ -60,11 +60,11 @@ export default function DonorsScreen() {
     return true;
   }), [requests, filterBlood, filterUrgency]);
 
-  const mapRegion = useMemo(() => location ? {
-    latitude:       location.latitude,
-    longitude:      location.longitude,
-    latitudeDelta:  deltaFromKm(25),
-    longitudeDelta: deltaFromKm(25),
+  // MapLibre takes a centre + zoomLevel — no latitudeDelta. We frame the
+  // 25 km discovery radius via zoomFromRadiusKm() at the Camera component.
+  const mapCenter = useMemo(() => location ? {
+    latitude:  location.latitude,
+    longitude: location.longitude,
   } : undefined, [location]);
 
   const onCardPress = useCallback((r: BloodRequest) => {
@@ -197,40 +197,38 @@ export default function DonorsScreen() {
       </View>
 
       {/* Map */}
-      {viewMode === 'map' && location && (
+      {viewMode === 'map' && location && mapCenter && (
         <View style={[styles.mapWrap, { height: height * 0.42 }]}>
-          <MapView
+          <MapLibreMap
             style={StyleSheet.absoluteFill}
-            provider={PROVIDER_DEFAULT}
-            region={mapRegion}
-            userInterfaceStyle={isDark ? 'dark' : 'light'}
-            showsUserLocation
-            showsMyLocationButton={false}
+            mapStyle={getMapStyleJSON(isDark)}
           >
-            {[1, 5, 15, 30].map(km => (
-              <Circle
-                key={km}
-                center={{ latitude: location.latitude, longitude: location.longitude }}
-                radius={km * 1000}
-                strokeColor={theme.border}
-                fillColor="transparent"
-                strokeWidth={1}
-              />
-            ))}
+            <Camera
+              initialViewState={{
+                center: [mapCenter.longitude, mapCenter.latitude],
+                zoom:   zoomFromRadiusKm(25),
+              }}
+            />
+            {/* Native location dot. */}
+            <UserLocation animated />
+
+            {/* Request pins — MapLibre uses [longitude, latitude] tuples. */}
             {filtered.map(req => (
-              <Marker
+              <MlMarker
                 key={req.id}
-                coordinate={{ latitude: req.latitude, longitude: req.longitude }}
-                onPress={() => onCardPress(req)}
+                lngLat={[req.longitude, req.latitude]}
+                anchor="center"
               >
-                <View style={[styles.mapPin, { backgroundColor: theme.primary }]}>
-                  <Text style={[styles.mapPinText, { color: theme.textOnPrimary }]}>
-                    {req.blood_group}
-                  </Text>
-                </View>
-              </Marker>
+                <Pressable onPress={() => onCardPress(req)} hitSlop={8}>
+                  <View style={[styles.mapPin, { backgroundColor: theme.primary }]}>
+                    <Text style={[styles.mapPinText, { color: theme.textOnPrimary }]}>
+                      {req.blood_group}
+                    </Text>
+                  </View>
+                </Pressable>
+              </MlMarker>
             ))}
-          </MapView>
+          </MapLibreMap>
         </View>
       )}
 

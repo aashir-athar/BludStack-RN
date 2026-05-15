@@ -6,7 +6,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
+import { Map as MapLibreMap, Camera, Marker as MlMarker } from '@maplibre/maplibre-react-native';
+import { getMapStyleJSON, zoomFromRadiusKm } from '@/utils/mapStyles';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,7 +25,7 @@ import LoadingScreen from '@/components/LoadingScreen';
 import { FontSize, FontWeight, Spacing, Radius, LetterSpacing, Elevation } from '@/constants/Typography';
 import { URGENCY_CONFIG, DONOR_FOR_RECIPIENT } from '@/constants/BloodData';
 import { timeAgo } from '@/utils/helpers';
-import { haversineDistance, formatDistance, estimateDriveMinutes, deltaFromKm } from '@/utils/geo';
+import { haversineDistance, formatDistance, estimateDriveMinutes } from '@/utils/geo';
 
 const URGENCY_COLORS: Record<string, string> = {
   critical: '#E8002D',
@@ -404,27 +405,30 @@ export default function RequestDetailScreen() {
 
         {/* ── Map preview ── */}
         <View style={[styles.mapCard, { overflow: 'hidden', borderColor: theme.border }]}>
-          <MapView
+          <MapLibreMap
             style={styles.map}
-            provider={PROVIDER_DEFAULT}
-            userInterfaceStyle={isDark ? 'dark' : 'light'}
-            region={{
-              latitude: request.latitude,
-              longitude: request.longitude,
-              latitudeDelta: deltaFromKm(2),
-              longitudeDelta: deltaFromKm(2),
-            }}
-            scrollEnabled={false}
-            zoomEnabled={false}
-            pitchEnabled={false}
-            rotateEnabled={false}
+            mapStyle={getMapStyleJSON(isDark)}
+            dragPan={false}
+            touchZoom={false}
+            touchRotate={false}
+            touchPitch={false}
+            doubleTapZoom={false}
           >
-            <Marker
-              coordinate={{ latitude: request.latitude, longitude: request.longitude }}
-              title={request.hospital_name}
-              description={request.hospital_address}
+            <Camera
+              initialViewState={{
+                center: [request.longitude, request.latitude],
+                zoom:   zoomFromRadiusKm(2),
+              }}
             />
-          </MapView>
+            <MlMarker
+              lngLat={[request.longitude, request.latitude]}
+              anchor="bottom"
+            >
+              <View style={[styles.mapMarker, { backgroundColor: theme.primary, borderColor: theme.surface }]}>
+                <Ionicons name="medical" size={14} color={theme.textOnPrimary} />
+              </View>
+            </MlMarker>
+          </MapLibreMap>
           <TouchableOpacity
             onPress={openMaps}
             style={[styles.mapOverlay, { backgroundColor: theme.overlay }]}
@@ -849,6 +853,11 @@ const styles = StyleSheet.create({
 
   mapCard:    { borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden', height: 180 },
   map:        { ...StyleSheet.absoluteFillObject },
+  mapMarker: {
+    width: 32, height: 32, borderRadius: Radius.pill,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2,
+  },
   mapOverlay: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     paddingVertical: Spacing[2], alignItems: 'center',
