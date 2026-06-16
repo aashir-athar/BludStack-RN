@@ -1,319 +1,215 @@
-// app/(tabs)/profile.tsx
-import React, { useState, useCallback } from 'react';
-import {
-  View, Text, ScrollView, StyleSheet,
-  TouchableOpacity, Alert,
-} from 'react-native';
+// Lever: control + sense of presence. The user sees who they are to the network
+// and holds every switch: availability, appearance, and the way out.
+import React, { useCallback, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter, router } from 'expo-router';
+import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { useTheme } from '@/contexts/ThemeContext';
-import { useAuth } from '@/contexts/AuthContext';
-import { useToast } from '@/contexts/ToastContext';
-import BloodGroupBadge from '@/components/BloodGroupBadge';
-import ToggleSwitch from '@/components/ToggleSwitch';
-import SelectSheet from '@/components/SelectSheet';
-import Button from '@/components/Button';
-import { FontSize, FontWeight, Spacing, Radius, LetterSpacing, TAB_BAR_BOTTOM_INSET } from '@/constants/Typography';
-import { BLOOD_GROUPS } from '@/constants/BloodData';
-import { formatDate, canDonateAgain } from '@/utils/helpers';
+import Constants from 'expo-constants';
+import { useAppTheme, useThemeMode, useThemeStore, type ThemeMode } from '@/stores/themeStore';
+import { useAuth, useIsDonor } from '@/stores/authStore';
+import { useToast } from '@/stores/toastStore';
+import { computeAge, DONOR_MIN_AGE, DONOR_MAX_AGE } from '@/utils/age';
+import { MIN_DONATION_GAP_DAYS } from '@/constants/BloodData';
+import { Spacing, Radius, FontWeight } from '@/constants/Typography';
+import { Text, Card, BloodGroupBadge, Button } from '@/ui';
+
+const APPEARANCE: { label: string; value: ThemeMode; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { label: 'Dark', value: 'dark', icon: 'moon' },
+  { label: 'Light', value: 'light', icon: 'sunny' },
+  { label: 'System', value: 'system', icon: 'phone-portrait' },
+];
+
+function initials(name: string) {
+  return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
+}
+
+function remainingCooldown(lastDonation: string | null | undefined): number {
+  if (!lastDonation) return 0;
+  return Math.max(0, Math.ceil(MIN_DONATION_GAP_DAYS - (Date.now() - new Date(lastDonation).getTime()) / 86_400_000));
+}
 
 export default function ProfileScreen() {
-  const { theme, mode, setMode } = useTheme();
+  const theme = useAppTheme();
+  const mode = useThemeMode();
+  const setMode = useThemeStore((s) => s.setMode);
   const { profile, signOut, updateProfile } = useAuth();
-  const toast  = useToast();
+  const isDonor = useIsDonor();
+  const toast = useToast();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [saving, setSaving] = useState(false);
-  const [themeSheet, setThemeSheet]  = useState(false);
-  const [bloodSheet, setBloodSheet]  = useState(false);
 
-  const { canDonate, daysLeft } = canDonateAgain(profile?.last_donation_date ?? null);
-
-  const toggle = useCallback(async (key: string, val: boolean) => {
-    Haptics.selectionAsync().catch(() => {});
+  const toggle = useCallback(async (key: 'is_available_to_donate' | 'share_medical_history', val: boolean) => {
+    void Haptics.selectionAsync();
     setSaving(true);
-    try { await updateProfile({ [key]: val } as any); }
-    catch (e: any) {
-      toast.error("Couldn't update", { description: e?.message ?? 'Try again in a moment' });
+    try {
+      await updateProfile({ [key]: val });
+    } catch (e) {
+      toast.error("Couldn't update", { description: e instanceof Error ? e.message : 'Try again in a moment' });
+    } finally {
+      setSaving(false);
     }
-    finally { setSaving(false); }
   }, [updateProfile, toast]);
 
   const handleSignOut = useCallback(() => {
-    Haptics.selectionAsync().catch(() => {});
+    void Haptics.selectionAsync();
     Alert.alert('Sign out', 'Sign out of BludStack? You can sign back in any time with your email.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign out', style: 'destructive', onPress: signOut },
+      { text: 'Sign out', style: 'destructive', onPress: () => { void signOut(); } },
     ]);
   }, [signOut]);
 
   if (!profile) return null;
 
-  const available      = profile.is_available_to_donate && canDonate;
-  const statusColor    = available ? theme.success : theme.warning;
-  const statusLabel    = available ? 'Available to donate' : daysLeft > 0 ? `Eligible in ${daysLeft} days` : 'Paused';
-
-  const themeOptions = [
-    { label: 'Dark',   value: 'dark',   description: 'Crimson on warm onyx' },
-    { label: 'Light',  value: 'light',  description: 'Crimson on warm bone' },
-    { label: 'System', value: 'system', description: 'Follows your device' },
-  ];
-  const bloodOptions = BLOOD_GROUPS.map(bg => ({ label: bg, value: bg }));
+  const age = computeAge(profile.date_of_birth);
+  const cooldownDays = remainingCooldown(profile.last_donation_date);
+  const ageOk = age !== null && age >= DONOR_MIN_AGE && age <= DONOR_MAX_AGE;
+  const available = profile.is_available_to_donate && cooldownDays === 0 && ageOk;
 
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
       <ScrollView
-        contentContainerStyle={{ paddingBottom: TAB_BAR_BOTTOM_INSET + Spacing[4] }}
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={{ paddingTop: insets.top + Spacing[4], paddingHorizontal: Spacing[5], paddingBottom: Spacing[10], gap: Spacing[5] }}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Hero ── */}
-        <View style={[styles.hero, { paddingTop: insets.top + Spacing[6], backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
-          <Text style={[styles.sectionLabel, { color: theme.textMuted, marginBottom: Spacing[3] }]}>
-            Account · Profile
-          </Text>
-          {/* Avatar */}
-          <View style={[styles.avatarRing, { borderColor: statusColor }]}>
+        <View style={{ alignItems: 'center', gap: Spacing[3] }}>
+          <View style={{ width: 88, height: 88, borderRadius: Radius.pill, overflow: 'hidden', backgroundColor: theme.primaryGhost, alignItems: 'center', justifyContent: 'center' }}>
             {profile.avatar_url ? (
-              <Image source={{ uri: profile.avatar_url }} style={styles.avatar} contentFit="cover" />
+              <Image source={profile.avatar_url} style={{ width: 88, height: 88 }} contentFit="cover" cachePolicy="memory-disk" />
             ) : (
-              <View style={[styles.avatarFallback, { backgroundColor: theme.cardElevated }]}>
-                <Text style={[styles.initial, { color: theme.textPrimary }]}>
-                  {profile.full_name.charAt(0).toUpperCase()}
+              <Text variant="display" tone="brand">{initials(profile.full_name)}</Text>
+            )}
+          </View>
+          <View style={{ alignItems: 'center', gap: Spacing[2] }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[1] }}>
+              <Text variant="title">{profile.full_name}</Text>
+              {profile.is_verified ? <Ionicons name="checkmark-circle" size={18} color={theme.success} /> : null}
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[2] }}>
+              <BloodGroupBadge group={profile.blood_group} size="sm" />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[1] }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: available ? theme.success : theme.warning }} />
+                <Text variant="caption" tone={available ? 'success' : 'warning'}>
+                  {available ? 'Available to donate' : cooldownDays > 0 ? `Eligible in ${cooldownDays} days` : 'Paused'}
                 </Text>
               </View>
-            )}
-          </View>
-
-          {/* Name */}
-          <Text style={[styles.heroName, { color: theme.textPrimary }]}>{profile.full_name}</Text>
-          <Text style={[styles.heroEmail, { color: theme.textMuted }]}>{profile.email}</Text>
-
-          {/* Status */}
-          <View style={[styles.statusRow, { backgroundColor: `${statusColor}15` }]}>
-            <View style={[styles.dot, { backgroundColor: statusColor }]} />
-            <Text style={[styles.statusLabel, { color: statusColor }]}>{statusLabel}</Text>
-            {profile.is_verified && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: Spacing[2] }}>
-                <Ionicons name="checkmark-circle" size={14} color={theme.success} />
-                <Text style={[styles.verified, { color: theme.success }]}>Verified</Text>
-              </View>
-            )}
-          </View>
-
-          {/* Stats */}
-          <View style={[styles.statsRow, { borderTopColor: theme.border }]}>
-            <Stat label="DONATIONS"   value={profile.total_donations} color={theme.primary} theme={theme} />
-            <View style={[styles.statSep, { backgroundColor: theme.border }]} />
-            <Stat label="LIVES HELPED" value={profile.total_donations} color={theme.success} theme={theme} />
-            <View style={[styles.statSep, { backgroundColor: theme.border }]} />
-            <Stat label="LAST DONATED"
-              value={profile.last_donation_date ? formatDate(profile.last_donation_date) : '—'}
-              color={theme.textPrimary} theme={theme} small />
-          </View>
-        </View>
-
-        {/* ── Blood group ── */}
-        <SectionHeader label="BLOOD PROFILE" theme={theme} />
-        <TouchableOpacity
-          onPress={() => setBloodSheet(true)}
-          style={[styles.settingRow, { backgroundColor: theme.card, borderColor: theme.border }]}
-          activeOpacity={0.7}
-        >
-          <BloodGroupBadge bloodGroup={profile.blood_group} size="md" inverted />
-          <View style={{ flex: 1, marginLeft: Spacing[3] }}>
-            <Text style={[styles.rowTitle, { color: theme.textPrimary }]}>{profile.blood_group}</Text>
-            <Text style={[styles.rowSub, { color: theme.textMuted }]}>Tap to update</Text>
-          </View>
-          <Text style={[styles.caret, { color: theme.textMuted }]}>›</Text>
-        </TouchableOpacity>
-
-        {/* ── Donor settings ──
-            Inner toggles render in 'inline' variant so they flush into the
-            parent card — nested rounded rectangles would compete for the eye.
-            A hairline divider separates the two rows. */}
-        <SectionHeader label="DONOR SETTINGS" theme={theme} />
-        <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <ToggleSwitch
-            variant="inline"
-            label="Available to Donate"
-            description="Receive alerts when someone nearby needs your blood group"
-            value={profile.is_available_to_donate}
-            onValueChange={v => toggle('is_available_to_donate', v)}
-            disabled={saving || !canDonate}
-          />
-          <View style={[styles.cardDivider, { backgroundColor: theme.divider }]} />
-          <ToggleSwitch
-            variant="inline"
-            label="Share Medical History"
-            description="Let matched donors/recipients see your disclosed conditions"
-            value={profile.share_medical_history}
-            onValueChange={v => toggle('share_medical_history', v)}
-            disabled={saving}
-          />
-        </View>
-
-        {/* Medical tags */}
-        {(profile.medical_conditions?.length ?? 0) > 0 && (
-          <>
-            <SectionHeader label="DISCLOSED CONDITIONS" theme={theme} />
-            <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-              <Text style={[styles.medNote, { color: theme.textMuted }]}>
-                {profile.share_medical_history ? 'Visible to matched parties' : 'Private — only you can see this'}
-              </Text>
-              <View style={styles.tags}>
-                {profile.medical_conditions!.map(c => (
-                  <View key={c} style={[styles.tag, { backgroundColor: theme.cardElevated }]}>
-                    <Text style={[styles.tagText, { color: theme.textSecondary }]}>{c}</Text>
-                  </View>
-                ))}
-              </View>
             </View>
-          </>
-        )}
+          </View>
+        </View>
 
-        {/* ── Edit profile ── */}
-        <SectionHeader label="PROFILE" theme={theme} />
-        <TouchableOpacity
-          onPress={() => router.push('/profile/edit')}
-          style={[styles.settingRow, { backgroundColor: theme.card, borderColor: theme.border }]}
-          activeOpacity={0.7}
+        <Card variant="elevated" style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={{ flex: 1, alignItems: 'center', gap: 2 }}>
+            <Text variant="title" style={{ fontVariant: ['tabular-nums'] }}>{profile.total_donations}</Text>
+            <Text variant="overline" tone="muted">Donations</Text>
+          </View>
+          <View style={{ width: 1, height: 32, backgroundColor: theme.divider }} />
+          <View style={{ flex: 1, alignItems: 'center', gap: 2 }}>
+            <Text variant="title" style={{ fontVariant: ['tabular-nums'], color: theme.primary }}>{profile.total_donations}</Text>
+            <Text variant="overline" tone="muted">Lives helped</Text>
+          </View>
+          <View style={{ width: 1, height: 32, backgroundColor: theme.divider }} />
+          <View style={{ flex: 1, alignItems: 'center', gap: 2 }}>
+            <Text variant="title" style={{ fontVariant: ['tabular-nums'] }}>{cooldownDays}</Text>
+            <Text variant="overline" tone="muted">Cooldown days</Text>
+          </View>
+        </Card>
+
+        <Pressable
+          onPress={() => { void Haptics.selectionAsync(); router.push('/profile/edit'); }}
           accessibilityRole="button"
           accessibilityLabel="Edit profile"
         >
-          <Ionicons name="person-circle-outline" size={20} color={theme.textPrimary} />
-          <View style={{ flex: 1, marginLeft: Spacing[3] }}>
-            <Text style={[styles.rowTitle, { color: theme.textPrimary }]}>Edit profile</Text>
-            <Text style={[styles.rowSub, { color: theme.textMuted }]}>
-              Name, blood, role, contact, medical
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-        </TouchableOpacity>
+          <Card variant="surface" style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[3] }}>
+            <Ionicons name="person-outline" size={20} color={theme.primary} />
+            <Text variant="label" style={{ flex: 1 }}>Edit profile</Text>
+            <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
+          </Card>
+        </Pressable>
 
-        {/* ── App settings ── */}
-        <SectionHeader label="APP SETTINGS" theme={theme} />
-        <TouchableOpacity
-          onPress={() => setThemeSheet(true)}
-          style={[styles.settingRow, { backgroundColor: theme.card, borderColor: theme.border }]}
-          activeOpacity={0.7}
-        >
-          <Ionicons
-            name={mode === 'dark' ? 'moon' : mode === 'light' ? 'sunny' : 'phone-portrait-outline'}
-            size={20}
-            color={theme.textPrimary}
-          />
-          <View style={{ flex: 1, marginLeft: Spacing[3] }}>
-            <Text style={[styles.rowTitle, { color: theme.textPrimary }]}>Appearance</Text>
-            <Text style={[styles.rowSub, { color: theme.textMuted }]}>
-              {mode === 'dark' ? 'Dark mode' : mode === 'light' ? 'Light mode' : 'System default'}
-            </Text>
+        {isDonor ? (
+          <View style={{ gap: Spacing[2] }}>
+            <Text variant="overline" tone="muted" style={{ marginLeft: Spacing[2] }}>Donor settings</Text>
+            <Card variant="surface" style={{ gap: Spacing[4] }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[3] }}>
+                <View style={{ flex: 1 }}>
+                  <Text variant="label">Available to donate</Text>
+                  <Text variant="caption" tone="muted">Show up in nearby donor searches</Text>
+                </View>
+                <Switch
+                  value={!!profile.is_available_to_donate}
+                  onValueChange={(v) => toggle('is_available_to_donate', v)}
+                  disabled={saving}
+                  trackColor={{ true: theme.primary, false: theme.border }}
+                  thumbColor={theme.textOnPrimary}
+                />
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[3] }}>
+                <View style={{ flex: 1 }}>
+                  <Text variant="label">Share medical history</Text>
+                  <Text variant="caption" tone="muted">Visible to a recipient only after you accept</Text>
+                </View>
+                <Switch
+                  value={!!profile.share_medical_history}
+                  onValueChange={(v) => toggle('share_medical_history', v)}
+                  disabled={saving}
+                  trackColor={{ true: theme.primary, false: theme.border }}
+                  thumbColor={theme.textOnPrimary}
+                />
+              </View>
+            </Card>
           </View>
-          <Text style={[styles.caret, { color: theme.textMuted }]}>›</Text>
-        </TouchableOpacity>
+        ) : null}
 
-        {/* ── About ── */}
-        <SectionHeader label="ABOUT" theme={theme} />
-        <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          {[
-            { iconName: 'information-circle-outline', label: 'Version',  value: '1.0.0' },
-            { iconName: 'heart-outline',              label: 'License',  value: 'Free and open source' },
-            { iconName: 'shield-checkmark-outline',   label: 'Security', value: 'Supabase RLS' },
-          ].map(({ iconName, label, value }) => (
-            <View key={label} style={[styles.aboutRow, { borderBottomColor: theme.border }]}>
-              <Ionicons name={iconName as any} size={18} color={theme.textMuted} />
-              <Text style={[styles.aboutLabel, { color: theme.textPrimary, marginLeft: Spacing[3] }]}>{label}</Text>
-              <Text style={[styles.aboutValue, { color: theme.textMuted }]}>{value}</Text>
-            </View>
-          ))}
+        <View style={{ gap: Spacing[2] }}>
+          <Text variant="overline" tone="muted" style={{ marginLeft: Spacing[2] }}>Appearance</Text>
+          <View style={{ flexDirection: 'row', gap: Spacing[2] }}>
+            {APPEARANCE.map((a) => {
+              const active = mode === a.value;
+              return (
+                <Pressable
+                  key={a.value}
+                  onPress={() => { void Haptics.selectionAsync(); setMode(a.value); }}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={a.label}
+                  style={{ flex: 1, alignItems: 'center', gap: Spacing[1], paddingVertical: Spacing[3], borderRadius: Radius.lg, borderCurve: 'continuous', borderWidth: 1.5, backgroundColor: active ? theme.primaryGhost : theme.surface, borderColor: active ? theme.primary : theme.border }}
+                >
+                  <Ionicons name={a.icon} size={20} color={active ? theme.primary : theme.textMuted} />
+                  <Text variant="labelSm" tone={active ? 'brand' : 'muted'}>{a.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
 
-        {/* ── Sign out ── */}
-        <View style={styles.signOutWrap}>
-          <Button label="Sign Out" variant="outline" onPress={handleSignOut} fullWidth size="lg" />
+        <View style={{ gap: Spacing[2] }}>
+          <Text variant="overline" tone="muted" style={{ marginLeft: Spacing[2] }}>About</Text>
+          <Card variant="surface" style={{ gap: Spacing[3] }}>
+            <AboutRow icon="pricetag-outline" label="Version" value={Constants.expoConfig?.version ?? '1.0.0'} />
+            <AboutRow icon="document-text-outline" label="License" value="MIT" />
+            <AboutRow icon="shield-checkmark-outline" label="Security" value="RLS + secure store" />
+          </Card>
         </View>
+
+        <Button label="Sign out" onPress={handleSignOut} variant="outline" size="lg" fullWidth icon="log-out-outline" haptic={false} />
       </ScrollView>
-
-      <SelectSheet
-        visible={themeSheet}
-        title="Appearance"
-        options={themeOptions}
-        selected={mode}
-        onSelect={v => setMode(v as any)}
-        onClose={() => setThemeSheet(false)}
-      />
-      <SelectSheet
-        visible={bloodSheet}
-        title="Blood Group"
-        options={bloodOptions}
-        selected={profile.blood_group}
-        onSelect={async bg => {
-          setSaving(true);
-          try { await updateProfile({ blood_group: bg }); }
-          catch (e: any) { Alert.alert('Error', e.message); }
-          finally { setSaving(false); }
-        }}
-        onClose={() => setBloodSheet(false)}
-      />
     </View>
   );
 }
 
-function Stat({ label, value, color, theme, small }: { label: string; value: any; color: string; theme: any; small?: boolean }) {
+function AboutRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
+  const theme = useAppTheme();
   return (
-    <View style={{ alignItems: 'center', flex: 1 }}>
-      <Text style={[{ color, fontWeight: FontWeight.black, fontSize: small ? FontSize.sm : FontSize.xl }]}>
-        {String(value)}
-      </Text>
-      <Text style={{ color: theme.textMuted, fontSize: FontSize['2xs'], fontWeight: FontWeight.bold, letterSpacing: LetterSpacing.widest, textTransform: 'uppercase', marginTop: 2 }}>
-        {label}
-      </Text>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[3] }}>
+      <Ionicons name={icon} size={18} color={theme.textTertiary} />
+      <Text variant="bodySm" style={{ flex: 1 }}>{label}</Text>
+      <Text variant="bodySm" tone="muted">{value}</Text>
     </View>
   );
 }
 
-function SectionHeader({ label, theme }: { label: string; theme: any }) {
-  return (
-    <Text style={[styles.sectionHeader, { color: theme.textMuted }]}>{label}</Text>
-  );
-}
-
-const styles = StyleSheet.create({
-  root:        { flex: 1 },
-  hero:        { alignItems: 'center', gap: Spacing[3], paddingBottom: Spacing[6], borderBottomWidth: StyleSheet.hairlineWidth },
-  avatarRing:  { borderRadius: Radius.full, borderWidth: 3, padding: 3, marginBottom: Spacing[1] },
-  avatar:      { width: 80, height: 80, borderRadius: 40 },
-  avatarFallback: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center' },
-  initial:     { fontSize: FontSize['2xl'], fontWeight: FontWeight.black },
-  heroName:    { fontSize: FontSize.xl, fontWeight: FontWeight.black, letterSpacing: LetterSpacing.snug },
-  sectionLabel: {
-    fontSize: FontSize.xs,
-    fontWeight: FontWeight.black,
-    letterSpacing: LetterSpacing.widest,
-    textTransform: 'uppercase',
-  },
-  heroEmail:   { fontSize: FontSize.sm, marginTop: -Spacing[2] },
-  statusRow:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing[4], paddingVertical: Spacing[2], borderRadius: Radius.full, gap: Spacing[2] },
-  dot:         { width: 7, height: 7, borderRadius: 4 },
-  statusLabel: { fontSize: FontSize.xs, fontWeight: FontWeight.bold, textTransform: 'uppercase', letterSpacing: LetterSpacing.wide },
-  verified:    { fontSize: FontSize.xs, fontWeight: FontWeight.bold },
-  statsRow:    { flexDirection: 'row', alignItems: 'center', width: '100%', borderTopWidth: StyleSheet.hairlineWidth, paddingTop: Spacing[5], paddingHorizontal: Spacing[4] },
-  statSep:     { width: StyleSheet.hairlineWidth, height: 32 },
-  sectionHeader: { fontSize: FontSize['2xs'], fontWeight: FontWeight.black, letterSpacing: LetterSpacing.widest, textTransform: 'uppercase', paddingHorizontal: Spacing[5], paddingTop: Spacing[6], paddingBottom: Spacing[2] },
-  settingRow:  { flexDirection: 'row', alignItems: 'center', padding: Spacing[4], marginHorizontal: Spacing[5], borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth },
-  card:        { marginHorizontal: Spacing[5], borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: Spacing[4] },
-  cardDivider: { height: StyleSheet.hairlineWidth, marginHorizontal: -Spacing[4] },
-  rowTitle:    { fontSize: FontSize.base, fontWeight: FontWeight.medium },
-  rowSub:      { fontSize: FontSize.xs, marginTop: 2 },
-  caret:       { fontSize: FontSize.lg },
-  medNote:     { fontSize: FontSize.xs, paddingVertical: Spacing[3] },
-  tags:        { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing[2], paddingBottom: Spacing[3] },
-  tag:         { paddingHorizontal: Spacing[2], paddingVertical: 3, borderRadius: Radius.pill },
-  tagText:     { fontSize: FontSize.xs },
-  aboutRow:    { flexDirection: 'row', alignItems: 'center', paddingVertical: Spacing[4], borderBottomWidth: StyleSheet.hairlineWidth, gap: Spacing[3] },
-  aboutIcon:   { fontSize: 18 },
-  aboutLabel:  { flex: 1, fontSize: FontSize.base, fontWeight: FontWeight.medium },
-  aboutValue:  { fontSize: FontSize.sm },
-  signOutWrap: { paddingHorizontal: Spacing[5], paddingTop: Spacing[6] },
-});
+const styles = StyleSheet.create({ root: { flex: 1 } });
