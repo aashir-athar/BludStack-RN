@@ -1,15 +1,9 @@
-// hooks/useLocation.ts
-// ─────────────────────────────────────────────────────────────────────────────
-// Fixes flaw #13: every refreshLocation() used to write to the DB unconditionally.
-// Now:
-//   • Writes go through the backend (consistent with the rest of the app)
-//   • Writes are throttled — at most one write per LOCATION_WRITE_MIN_GAP_MS
-//   • Writes only fire if the user has moved more than LOCATION_MIN_DELTA_M
-// ─────────────────────────────────────────────────────────────────────────────
-
-import { useState, useEffect, useCallback, useRef } from 'react';
+// Foreground location. Writes to the backend are throttled (>=1/min and only
+// after moving >=100m), so a donor appears in nearby searches without spamming
+// the API. Reverse geocode for a human-readable address (best-effort).
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Location from 'expo-location';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/stores/authStore';
 import { apiUpdateLocation } from '@/utils/api';
 
 export interface LocationCoords {
@@ -28,8 +22,8 @@ interface UseLocationReturn {
   refreshLocation: () => Promise<void>;
 }
 
-const LOCATION_WRITE_MIN_GAP_MS = 60_000;  // 1 minute
-const LOCATION_MIN_DELTA_M      = 100;     // 100 metres
+const LOCATION_WRITE_MIN_GAP_MS = 60_000;
+const LOCATION_MIN_DELTA_M = 100;
 
 function metresBetween(a: LocationCoords, b: LocationCoords): number {
   const R = 6371000;
@@ -44,14 +38,14 @@ function metresBetween(a: LocationCoords, b: LocationCoords): number {
 
 export function useLocation(autoStart = false): UseLocationReturn {
   const { user } = useAuth();
-  const [location, setLocation]           = useState<LocationCoords | null>(null);
-  const [address, setAddress]             = useState<string | null>(null);
-  const [permissionGranted, setGranted]   = useState(false);
-  const [loading, setLoading]             = useState(false);
-  const [error, setError]                 = useState<string | null>(null);
+  const [location, setLocation] = useState<LocationCoords | null>(null);
+  const [address, setAddress] = useState<string | null>(null);
+  const [permissionGranted, setGranted] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const lastWriteAtRef = useRef<number>(0);
-  const lastWroteRef   = useRef<LocationCoords | null>(null);
+  const lastWriteAtRef = useRef(0);
+  const lastWroteRef = useRef<LocationCoords | null>(null);
 
   const requestPermission = useCallback(async (): Promise<boolean> => {
     const { status } = await Location.requestForegroundPermissionsAsync();
@@ -63,11 +57,8 @@ export function useLocation(autoStart = false): UseLocationReturn {
   const reverseGeocode = useCallback(async (lat: number, lon: number) => {
     try {
       const results = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lon });
-      if (results.length > 0) {
-        const r = results[0];
-        const parts = [r.street, r.district, r.city, r.region].filter(Boolean);
-        setAddress(parts.join(', '));
-      }
+      const r = results[0];
+      if (r) setAddress([r.street, r.district, r.city, r.region].filter(Boolean).join(', '));
     } catch {
       // address is non-critical
     }
@@ -78,15 +69,14 @@ export function useLocation(autoStart = false): UseLocationReturn {
     const now = Date.now();
     const last = lastWroteRef.current;
     const movedEnough = !last || metresBetween(last, coords) >= LOCATION_MIN_DELTA_M;
-    const cooledDown  = now - lastWriteAtRef.current >= LOCATION_WRITE_MIN_GAP_MS;
+    const cooledDown = now - lastWriteAtRef.current >= LOCATION_WRITE_MIN_GAP_MS;
     if (!movedEnough && !cooledDown) return;
-
     try {
       await apiUpdateLocation(coords.latitude, coords.longitude);
       lastWriteAtRef.current = now;
-      lastWroteRef.current   = coords;
+      lastWroteRef.current = coords;
     } catch {
-      // server may be down — keep last-known state, don't error to user
+      // server may be down; keep last-known state, never surface to the user
     }
   }, [user?.id]);
 
@@ -101,26 +91,24 @@ export function useLocation(autoStart = false): UseLocationReturn {
       }
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       const coords: LocationCoords = {
-        latitude:  pos.coords.latitude,
+        latitude: pos.coords.latitude,
         longitude: pos.coords.longitude,
-        accuracy:  pos.coords.accuracy ?? undefined,
+        accuracy: pos.coords.accuracy ?? undefined,
       };
       setLocation(coords);
       setGranted(true);
-      await Promise.all([
-        reverseGeocode(coords.latitude, coords.longitude),
-        maybeWriteLocation(coords),
-      ]);
-    } catch (e: any) {
-      setError(e?.message ?? 'Failed to get location');
+      await Promise.all([reverseGeocode(coords.latitude, coords.longitude), maybeWriteLocation(coords)]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to get location');
     } finally {
       setLoading(false);
     }
   }, [requestPermission, reverseGeocode, maybeWriteLocation]);
 
   useEffect(() => {
-    if (!autoStart) return;
-    refreshLocation();
+    // Deliberate fetch-on-mount of an imperative external system (the GPS).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (autoStart) void refreshLocation();
   }, [autoStart, refreshLocation]);
 
   return { location, address, permissionGranted, loading, error, requestPermission, refreshLocation };
