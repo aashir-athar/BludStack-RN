@@ -1,130 +1,80 @@
-// app/(tabs)/my-requests.tsx
-// Lever: control + closure. The recipient sees every request they've posted,
-// filtered by status. Each card taps through to the full detail modal where
-// they manage accepted donors / completions / cancellation.
-
+// Lever: control + closure. The recipient sees every request they posted,
+// filtered by status; each taps through to the detail modal to manage donors.
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, RefreshControl } from 'react-native';
+import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useTheme } from '@/contexts/ThemeContext';
-import { useMyRequests, type BloodRequest } from '@/hooks/useRequests';
-import RequestCard from '@/components/RequestCard';
-import EmptyState from '@/components/EmptyState';
-import {
-  FontSize, FontWeight, Spacing, Radius, LetterSpacing,
-  TAB_BAR_BOTTOM_INSET, Elevation,
-} from '@/constants/Typography';
+import { useAppTheme } from '@/stores/themeStore';
+import { useMyRequests } from '@/queries/requests';
+import { Spacing, Radius, FontWeight, Elevation } from '@/constants/Typography';
+import { Text, RequestCard, EmptyState, type RequestCardData } from '@/ui';
 
 type Filter = 'all' | 'active' | 'fulfilled' | 'cancelled';
-
-const FILTERS: ReadonlyArray<{ label: string; value: Filter }> = [
-  { label: 'All',       value: 'all' },
-  { label: 'Active',    value: 'active' },
+const FILTERS: readonly { label: string; value: Filter }[] = [
+  { label: 'All', value: 'all' },
+  { label: 'Active', value: 'active' },
   { label: 'Fulfilled', value: 'fulfilled' },
   { label: 'Cancelled', value: 'cancelled' },
-] as const;
+];
 
 export default function MyRequestsScreen() {
-  const { theme } = useTheme();
-  const insets    = useSafeAreaInsets();
-  const router    = useRouter();
-  const { requests, loading, refetch } = useMyRequests();
+  const theme = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { data, refetch, isRefetching } = useMyRequests();
   const [filter, setFilter] = useState<Filter>('all');
 
+  const requests = useMemo(() => (data ?? []) as RequestCardData[], [data]);
   const filtered = useMemo(
-    () => filter === 'all' ? requests : requests.filter(r => r.status === filter),
+    () => (filter === 'all' ? requests : requests.filter((r) => r.status === filter)),
     [requests, filter],
   );
 
-  const onCardPress = useCallback((r: BloodRequest) => {
-    Haptics.selectionAsync().catch(() => {});
-    router.push({ pathname: '/request/[id]', params: { id: r.id } });
-  }, [router]);
+  const onFilter = useCallback((value: Filter) => { void Haptics.selectionAsync(); setFilter(value); }, []);
+  const newRequest = useCallback(() => { void Haptics.selectionAsync(); router.push('/(tabs)/request'); }, [router]);
 
-  const onFilter = useCallback((value: Filter) => {
-    Haptics.selectionAsync().catch(() => {});
-    setFilter(value);
-  }, []);
-
-  const renderItem = useCallback(({ item }: { item: BloodRequest }) => (
-    <RequestCard request={item} onPress={onCardPress} />
-  ), [onCardPress]);
-
-  const keyExtractor = useCallback((item: BloodRequest) => item.id, []);
-
-  const newRequest = useCallback(() => {
-    Haptics.selectionAsync().catch(() => {});
-    router.push('/(tabs)/request');
-  }, [router]);
+  const renderItem = useCallback(({ item }: { item: RequestCardData }) => (
+    <RequestCard request={item} onPress={() => router.push({ pathname: '/request/[id]', params: { id: item.id } })} />
+  ), [router]);
 
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
-      {/* Header */}
-      <View
-        style={[
-          styles.header,
-          {
-            paddingTop: insets.top + Spacing[4],
-            backgroundColor: theme.surface,
-            borderBottomColor: theme.border,
-          },
-        ]}
-      >
-        <View style={styles.headerRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>Control · Your posts</Text>
-            <Text style={[styles.title, { color: theme.textPrimary }]}>Your requests</Text>
-            <Text style={[styles.subtitle, { color: theme.textMuted }]}>
+      <View style={[styles.header, { paddingTop: insets.top + Spacing[4], backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[3] }}>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text variant="overline" tone="muted">Control . Your posts</Text>
+            <Text variant="headline">Your requests</Text>
+            <Text variant="caption" tone="muted" style={{ fontVariant: ['tabular-nums'] }}>
               {requests.length} {requests.length === 1 ? 'request' : 'requests'} total
             </Text>
           </View>
           <Pressable
             onPress={newRequest}
-            style={({ pressed }) => [
-              styles.newBtn,
-              { backgroundColor: theme.primary, opacity: pressed ? 0.92 : 1 },
-              Elevation.sm,
-            ]}
             accessibilityRole="button"
             accessibilityLabel="Post a new request"
+            style={[{ flexDirection: 'row', alignItems: 'center', gap: Spacing[1], paddingHorizontal: Spacing[4], paddingVertical: Spacing[2], borderRadius: Radius.pill, borderCurve: 'continuous', backgroundColor: theme.primary }, Elevation.sm]}
           >
             <Ionicons name="add" size={16} color={theme.textOnPrimary} />
-            <Text style={[styles.newBtnLabel, { color: theme.textOnPrimary }]}>New</Text>
+            <Text variant="label" style={{ color: theme.textOnPrimary, fontWeight: FontWeight.black }}>New</Text>
           </Pressable>
         </View>
 
-        {/* Filter pills */}
-        <View style={styles.filterRow}>
-          {FILTERS.map(f => {
+        <View style={{ flexDirection: 'row', gap: Spacing[2] }}>
+          {FILTERS.map((f) => {
             const active = filter === f.value;
             return (
               <Pressable
                 key={f.value}
                 onPress={() => onFilter(f.value)}
-                style={({ pressed }) => [
-                  styles.pill,
-                  {
-                    backgroundColor: active ? theme.textPrimary : theme.cardElevated,
-                    borderColor:     active ? theme.textPrimary : theme.border,
-                    opacity: pressed ? 0.9 : 1,
-                  },
-                ]}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: active }}
                 accessibilityLabel={f.label}
+                style={{ paddingHorizontal: Spacing[3], paddingVertical: Spacing[2], borderRadius: Radius.pill, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, backgroundColor: active ? theme.textPrimary : theme.cardElevated, borderColor: active ? theme.textPrimary : theme.border }}
               >
-                <Text
-                  style={[
-                    styles.pillLabel,
-                    { color: active ? theme.textInverse : theme.textPrimary },
-                  ]}
-                >
-                  {f.label}
-                </Text>
+                <Text variant="labelSm" style={{ color: active ? theme.textInverse : theme.textPrimary }}>{f.label}</Text>
               </Pressable>
             );
           })}
@@ -133,35 +83,21 @@ export default function MyRequestsScreen() {
 
       <FlashList
         data={filtered}
-        keyExtractor={keyExtractor}
+        keyExtractor={(item) => item.id}
         renderItem={renderItem}
-        getItemType={() => 'request'}
-        contentContainerStyle={{
-          paddingHorizontal: Spacing[5],
-          paddingTop: Spacing[5],
-          paddingBottom: TAB_BAR_BOTTOM_INSET + Spacing[4],
-        }}
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={{ paddingHorizontal: Spacing[5], paddingTop: Spacing[5], paddingBottom: Spacing[8] }}
+        ItemSeparatorComponent={() => <View style={{ height: Spacing[3] }} />}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={false}
-            onRefresh={refetch}
-            tintColor="transparent"
-            colors={['transparent']}
-            progressBackgroundColor="transparent"
-            progressViewOffset={-1000}
-          />
-        }
+        refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={theme.primary} />}
         ListEmptyComponent={
           <EmptyState
-            iconName={filter === 'all' ? 'document-text-outline' : 'filter-outline'}
+            icon={filter === 'all' ? 'document-text-outline' : 'filter-outline'}
             title={filter === 'all' ? 'No requests yet' : `No ${filter} requests`}
-            description={
-              filter === 'all'
-                ? 'Post a request and matched donors near the hospital will be notified within seconds.'
-                : 'Switch the filter above to see other requests.'
-            }
-            actionLabel={filter === 'all' ? 'Post your first request' : undefined}
+            body={filter === 'all'
+              ? 'Post one and matched donors near the hospital are notified in seconds.'
+              : 'Switch the filter above to see your other requests.'}
+            actionLabel={filter === 'all' ? 'Post a request' : undefined}
             onAction={filter === 'all' ? newRequest : undefined}
           />
         }
@@ -173,42 +109,7 @@ export default function MyRequestsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   header: {
-    paddingHorizontal: Spacing[5],
-    paddingBottom: Spacing[4],
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: Spacing[4],
-  },
-  headerRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing[3] },
-  sectionLabel: {
-    fontSize: FontSize.xs,
-    fontWeight: FontWeight.black,
-    letterSpacing: LetterSpacing.widest,
-    textTransform: 'uppercase',
-    marginBottom: Spacing[1],
-  },
-  title: {
-    fontSize: FontSize['2xl'], fontWeight: FontWeight.black,
-    letterSpacing: LetterSpacing.tighter,
-  },
-  subtitle: { fontSize: FontSize.xs, marginTop: 2, fontWeight: FontWeight.semibold, letterSpacing: LetterSpacing.snug },
-  newBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing[1],
-    paddingHorizontal: Spacing[4], paddingVertical: Spacing[2],
-    borderRadius: Radius.pill,
-  },
-  newBtnLabel: {
-    fontSize: FontSize.sm, fontWeight: FontWeight.black,
-    letterSpacing: LetterSpacing.snug,
-  },
-  filterRow: { flexDirection: 'row', gap: Spacing[2] },
-  pill: {
-    paddingHorizontal: Spacing[3],
-    paddingVertical: Spacing[2],
-    borderRadius: Radius.pill,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  pillLabel: {
-    fontSize: FontSize.xs, fontWeight: FontWeight.bold,
-    letterSpacing: LetterSpacing.snug,
+    paddingHorizontal: Spacing[5], paddingBottom: Spacing[4],
+    borderBottomWidth: StyleSheet.hairlineWidth, gap: Spacing[4],
   },
 });
