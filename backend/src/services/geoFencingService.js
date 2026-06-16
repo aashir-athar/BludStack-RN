@@ -187,10 +187,11 @@ async function expandOne(request) {
 
   await notifyDonors(request, inRing);
 
-  if (ringIndex > 0 && inRing.length === 0) {
-    // No new donors this ring — still nudge recipient so they know we're trying
-    await notifyRecipientExpansion(request, radiusKm);
-  } else if (ringIndex > 0) {
+  // From ring 1 onward, nudge the recipient that the search is widening —
+  // whether or not this ring surfaced new donors — so they know we're trying.
+  // The per-request CAS claim in tick() guarantees one instance per ring, so
+  // this fires at most once per expansion (no duplicate "still searching" push).
+  if (ringIndex > 0) {
     await notifyRecipientExpansion(request, radiusKm);
   }
 
@@ -292,7 +293,7 @@ function startWorker() {
   if (tickHandle) return;
   tickHandle = setInterval(tick, TICK_INTERVAL_MS);
   if (typeof tickHandle.unref === 'function') tickHandle.unref();
-  console.log(`⏱️  Geo-fence worker started — tick every ${TICK_INTERVAL_MS / 1000}s`);
+  console.log(`[geoFence] worker started — tick every ${TICK_INTERVAL_MS / 1000}s`);
 }
 
 function stopWorker() {

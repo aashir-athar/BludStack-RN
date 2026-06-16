@@ -16,8 +16,10 @@ const MIN_DONATION_GAP_DAYS = 90;
  * Donor accepts a blood request. Body: { requestId }
  *
  * Uses the `accept_blood_request` RPC for race-free capacity + status checks
- * (fixes the read-then-write race in flaw #8). Cooldown is checked server-side
- * here because it depends on the donor profile, not the request.
+ * (fixes the read-then-write race in flaw #8). The availability + 90-day
+ * cooldown checks below are a fast, friendly pre-check; the RPC re-enforces
+ * both inside the donor-profile row lock, so they are authoritative and
+ * race-free even under concurrent accepts (migration 2026-06-16-cooldown-in-rpc).
  */
 async function acceptRequest(req, res, next) {
   try {

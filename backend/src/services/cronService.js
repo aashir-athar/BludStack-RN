@@ -98,7 +98,7 @@ function startCronJobs() {
     name: 'health-log',
   });
 
-  console.log('⏰  Cron jobs started: [expire-stale-requests, clean-push-tokens, health-log]');
+  console.log('[cron] jobs started: [expire-stale-requests, clean-push-tokens, health-log]');
 }
 
 module.exports = { startCronJobs, expireStaleRequests };

@@ -1,7 +1,7 @@
 // src/server.js
 'use strict';
 
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const express = require('express');
 const helmet  = require('helmet');
@@ -107,7 +107,7 @@ const IS_VERCEL = !!process.env.VERCEL;
 
 if (!IS_VERCEL && require.main === module) {
   app.listen(PORT, () => {
-    console.log(`\n🩸 BludStack API running on port ${PORT}`);
+    console.log(`\nBludStack API running on port ${PORT}`);
     console.log(`   Health: http://localhost:${PORT}/health`);
     console.log(`   Env:    ${process.env.NODE_ENV || 'development'}\n`);
 

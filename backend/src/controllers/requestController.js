@@ -4,7 +4,7 @@
 const { supabaseAdmin }      = require('../utils/supabaseAdmin');
 const { success, error }     = require('../utils/response');
 const { startGeoFencing, cancelGeoFencing } = require('../services/geoFencingService');
-const { filterByRadius, compatibleDonorGroups } = require('../utils/geo');
+const { filterByRadius } = require('../utils/geo');
 
 /**
  * POST /api/v1/requests
@@ -42,7 +42,7 @@ async function createRequest(req, res, next) {
 
     if (dbErr) throw dbErr;
 
-    // 🚀 Start geo-fencing expansion in background (non-blocking)
+    // Start geo-fencing expansion in the background (non-blocking).
     setImmediate(() => startGeoFencing(data));
 
     return success(res, data, 'Blood request posted. Notifying nearby donors…', 201);
@@ -64,39 +64,61 @@ async function listRequests(req, res, next) {
     const urgency    = req.query.urgency;
     const page       = Math.max(1, parseInt(req.query.page ?? '1', 10));
     const limit      = Math.min(50, parseInt(req.query.limit ?? '20', 10));
+    const hasGeo     = !isNaN(lat) && !isNaN(lon);
 
-    let query = supabaseAdmin
-      .from('blood_requests')
-      .select(`
-        *,
-        recipient:profiles!recipient_id (
-          full_name, avatar_url
-        )
-      `, { count: 'exact' })
-      .eq('status', 'active')
-      // Exclude the caller's own posted requests — they aren't a donor for
-      // themselves. Belt-and-suspenders with mobile-side filtering.
-      .neq('recipient_id', req.userId)
-      .order('created_at', { ascending: false })
-      .range((page - 1) * limit, page * limit - 1);
+    // Shared base query. Exclude the caller's own posted requests — they aren't
+    // a donor for themselves (belt-and-suspenders with mobile-side filtering).
+    const buildBase = () => {
+      let q = supabaseAdmin
+        .from('blood_requests')
+        .select(`
+          *,
+          recipient:profiles!recipient_id (
+            full_name, avatar_url
+          )
+        `, { count: 'exact' })
+        .eq('status', 'active')
+        .neq('recipient_id', req.userId)
+        .order('created_at', { ascending: false });
+      if (bloodGroup) q = q.eq('blood_group', bloodGroup);
+      if (urgency)    q = q.eq('urgency', urgency);
+      return q;
+    };
 
-    if (bloodGroup) query = query.eq('blood_group', bloodGroup);
-    if (urgency)    query = query.eq('urgency', urgency);
+    if (hasGeo) {
+      // Radius filtering is done in JS (PostGIS-free), so DB-level range
+      // pagination would count + page rows the radius filter later drops —
+      // yielding a wrong `total` and mis-ordered pages. Instead scan a bounded
+      // window of active requests, filter + distance-sort, then paginate in
+      // memory. `scanCapped` is surfaced honestly rather than silently
+      // truncating the result set.
+      const MAX_SCAN = 500;
+      const { data, error: dbErr } = await buildBase().limit(MAX_SCAN);
+      if (dbErr) throw dbErr;
 
-    const { data, error: dbErr, count } = await query;
-    if (dbErr) throw dbErr;
+      const scanned     = (data ?? []).length;
+      const withinRadius = filterByRadius(data ?? [], lat, lon, radiusKm); // already distance-sorted
+      const start        = (page - 1) * limit;
 
-    let requests = data ?? [];
-
-    // Client-side radius filter (PostGIS-free approach)
-    if (!isNaN(lat) && !isNaN(lon)) {
-      requests = filterByRadius(requests, lat, lon, radiusKm)
-        .map(({ distanceKm, ...r }) => ({ ...r, distanceKm }));
+      return success(res, {
+        requests: withinRadius.slice(start, start + limit),
+        pagination: {
+          page,
+          limit,
+          total: withinRadius.length,
+          radiusFiltered: true,
+          scanCapped: scanned >= MAX_SCAN,
+        },
+      });
     }
 
+    const { data, error: dbErr, count } = await buildBase()
+      .range((page - 1) * limit, page * limit - 1);
+    if (dbErr) throw dbErr;
+
     return success(res, {
-      requests,
-      pagination: { page, limit, total: count ?? requests.length },
+      requests: data ?? [],
+      pagination: { page, limit, total: count ?? (data ?? []).length },
     });
   } catch (err) {
     next(err);

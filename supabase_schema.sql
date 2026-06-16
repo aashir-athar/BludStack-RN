@@ -292,6 +292,8 @@ declare
   v_existing          response_status_enum;
   v_resp_id           uuid;
   v_other_commitment  uuid;
+  v_last_donation     timestamptz;
+  v_available         boolean;
 begin
   -- Lock the request row for the duration of this transaction.
   -- Every column reference is alias-qualified — without that, PG treats
@@ -339,22 +341,50 @@ begin
   end if;
 
   -- ────────────────────────────────────────────────────────────────────────
+  -- DONOR ELIGIBILITY (availability + 90-day cooldown) — race-free
+  -- ────────────────────────────────────────────────────────────────────────
+  -- Lock the donor's profile row AND read the eligibility fields in the same
+  -- lock. The lock also serialises concurrent accepts on DIFFERENT requests for
+  -- the SAME donor (without it, each call would lock only its own
+  -- blood_requests row and both could pass the one-commitment check at once).
+  -- Enforcing availability + cooldown here makes them authoritative inside the
+  -- transaction instead of a racy app-layer pre-check.
+  select p.last_donation_date, p.is_available_to_donate
+    into v_last_donation, v_available
+    from public.profiles p
+   where p.id = p_donor_id
+   for update;
+
+  if not found then
+    return query select null::uuid, null::response_status_enum, 'Donor profile not found';
+    return;
+  end if;
+
+  if v_available is distinct from true then
+    return query select null::uuid, null::response_status_enum,
+      'You are currently marked as unavailable to donate';
+    return;
+  end if;
+
+  if v_last_donation is not null
+     and v_last_donation > now() - interval '90 days' then
+    return query select null::uuid, null::response_status_enum,
+      format(
+        'You must wait %s more day(s) before donating again',
+        ceil(extract(epoch from (v_last_donation + interval '90 days' - now())) / 86400.0)::int
+      );
+    return;
+  end if;
+
+  -- ────────────────────────────────────────────────────────────────────────
   -- ONE-ACTIVE-COMMITMENT RULE
   -- ────────────────────────────────────────────────────────────────────────
-  -- A donor can only have ONE outstanding `accepted` response at a time —
-  -- i.e. they cannot commit to a second request while a prior commitment is
-  -- still in flight on an `active` blood_request. The block clears when:
-  --   (a) the prior response is marked `completed` (donation recorded), or
-  --   (b) the prior request flips to `fulfilled`, `cancelled`, or `expired`.
-  -- Checked here (server-side), authoritative regardless of client state.
-  --
-  -- Race serialisation: lock the donor's profile row. Without this lock, two
-  -- concurrent accepts on DIFFERENT requests for the SAME donor would each
-  -- only lock their own blood_requests row and both could pass the check at
-  -- the same time. Locking the profile row forces those concurrent calls to
-  -- serialise on the donor.
-  perform 1 from public.profiles where id = p_donor_id for update;
-
+  -- A donor can only have ONE outstanding `accepted` response at a time — they
+  -- cannot commit to a second request while a prior commitment is still in
+  -- flight on an `active` blood_request. The block clears when (a) the prior
+  -- response is marked `completed`, or (b) the prior request flips to
+  -- `fulfilled`, `cancelled`, or `expired`. Serialised by the profile-row lock
+  -- taken just above.
   select rr.request_id
     into v_other_commitment
     from public.request_responses rr

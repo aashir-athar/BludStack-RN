@@ -2,6 +2,12 @@
 'use strict';
 
 const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = require('express-rate-limit');
+
+// express-rate-limit v8 requires IP-based keys to pass through `ipKeyGenerator`
+// so IPv6 addresses are normalised to a /56 subnet (prevents trivial limit
+// evasion by rotating within a single IPv6 allocation). Prefer the authed user.
+const userOrIpKey = (req) => req.userId ?? ipKeyGenerator(req.ip ?? '');
 
 const WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10); // 15 min
 const MAX       = parseInt(process.env.RATE_LIMIT_MAX       || '100',    10);
@@ -45,7 +51,7 @@ const authRateLimiter = rateLimit({
 const notifRateLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
   max: 20,
-  keyGenerator: (req) => req.userId || req.ip,
+  keyGenerator: userOrIpKey,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -55,4 +61,23 @@ const notifRateLimiter = rateLimit({
   },
 });
 
-module.exports = { globalRateLimiter, authRateLimiter, notifRateLimiter };
+/**
+ * Live-location heartbeat limiter — the donor app pushes GPS roughly once every
+ * 15-30s while en-route, so ~2-4 req/min is normal. Cap at 40/min per donor to
+ * absorb bursts and movement-triggered pushes while blocking a runaway client
+ * or a malicious flood. Keyed by donor id (one active commitment at a time).
+ */
+const heartbeatRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 40,
+  keyGenerator: userOrIpKey,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: 'Heartbeat rate exceeded. Slow down location updates.',
+    status: 429,
+  },
+});
+
+module.exports = { globalRateLimiter, authRateLimiter, notifRateLimiter, heartbeatRateLimiter };

@@ -10,7 +10,9 @@ const { expireStaleRequests } = require('../../src/services/cronService');
 
 function isAuthorised(req) {
   const secret = process.env.CRON_SECRET;
-  if (!secret) return true; // unset = unprotected (dev only)
+  // Fail closed in production — a missing secret must never leave the cron
+  // endpoint publicly triggerable. Open only outside production for local dev.
+  if (!secret) return process.env.NODE_ENV !== 'production';
   const auth  = req.headers?.authorization ?? '';
   const query = (req.query && (req.query.secret ?? req.query.token)) ?? null;
   return auth === `Bearer ${secret}` || query === secret;

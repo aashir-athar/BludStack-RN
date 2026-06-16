@@ -1,7 +1,7 @@
 services:
   - type: web
     name: bludstack-api
-    env: node
+    runtime: node              # `env: node` was the deprecated key
     region: singapore          # closest to Pakistan / South Asia
     plan: free                 # free tier (spins down after inactivity)
     buildCommand: npm install
@@ -18,6 +18,10 @@ services:
         sync: false            # set manually — NEVER commit this
       - key: ALLOWED_ORIGINS
         sync: false            # comma-separated list of your frontend origins
+      - key: CRON_SECRET
+        sync: false            # REQUIRED — shared secret for /api/cron/* (fails closed in prod)
+      - key: TRUST_PROXY
+        value: "1"             # Render runs one proxy hop in front of the app
       - key: RATE_LIMIT_WINDOW_MS
         value: "900000"
       - key: RATE_LIMIT_MAX

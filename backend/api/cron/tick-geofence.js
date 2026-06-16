@@ -10,8 +10,9 @@
 //   • Authorization: Bearer <CRON_SECRET>  (Vercel-Cron-style; preferred)
 //   • ?secret=<CRON_SECRET>                (query param; most external services)
 //
-// If CRON_SECRET is unset, the endpoint stays open — fine for local development,
-// NEVER for production. Always set CRON_SECRET in your hosting env.
+// Auth fails CLOSED in production: if CRON_SECRET is unset, the endpoint returns
+// 401 in production and is open only in non-production (local dev). Always set
+// CRON_SECRET in your hosting env (Render / Railway / Vercel).
 
 'use strict';
 
@@ -19,7 +20,9 @@ const { tick } = require('../../src/services/geoFencingService');
 
 function isAuthorised(req) {
   const secret = process.env.CRON_SECRET;
-  if (!secret) return true; // unset = unprotected (dev only)
+  // Fail closed in production — a missing secret must never leave the cron
+  // endpoint publicly triggerable. Open only outside production for local dev.
+  if (!secret) return process.env.NODE_ENV !== 'production';
   const auth  = req.headers?.authorization ?? '';
   const query = (req.query && (req.query.secret ?? req.query.token)) ?? null;
   return auth === `Bearer ${secret}` || query === secret;

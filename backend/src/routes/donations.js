@@ -6,6 +6,7 @@ const { body } = require('express-validator');
 
 const { requireAuth }  = require('../middleware/auth');
 const { validate }     = require('../middleware/validate');
+const { heartbeatRateLimiter } = require('../middleware/rateLimiter');
 const {
   acceptRequest,
   declineRequest,
@@ -59,6 +60,7 @@ router.post(
 router.post(
   '/heartbeat',
   requireAuth,
+  heartbeatRateLimiter,
   [
     body('requestId').isUUID().withMessage('requestId must be a valid UUID'),
     body('latitude').isFloat({ min: -90, max: 90 }),
