@@ -21,6 +21,22 @@ try {
 } catch {
   KeyboardProvider = ({ children }: { children: React.ReactNode }) => <>{children}</>;
 }
+import { TamaguiProvider } from '@tamagui/core';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { tamaguiConfig } from '@/tamagui.config';
+import { queryClient } from '@/queries/client';
+import { useIsDark } from '@/stores/themeStore';
+
+// Keeps the Tamagui theme ($token colours) in sync with the app's dark/light
+// store, so the new ui/ components switch with the user's appearance choice.
+function TamaguiThemeBridge({ children }: { children: React.ReactNode }) {
+  const isDark = useIsDark();
+  return (
+    <TamaguiProvider config={tamaguiConfig} defaultTheme={isDark ? 'dark' : 'light'}>
+      {children}
+    </TamaguiProvider>
+  );
+}
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { ToastProvider } from '@/contexts/ToastContext';
@@ -202,13 +218,17 @@ export default function RootLayout() {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <KeyboardProvider>
           <SafeAreaProvider>
-            <ThemeProvider>
-              <AuthProvider>
-                <ToastProvider>
-                  <RootNavigator />
-                </ToastProvider>
-              </AuthProvider>
-            </ThemeProvider>
+            <QueryClientProvider client={queryClient}>
+              <TamaguiThemeBridge>
+                <ThemeProvider>
+                <AuthProvider>
+                  <ToastProvider>
+                    <RootNavigator />
+                  </ToastProvider>
+                  </AuthProvider>
+                </ThemeProvider>
+              </TamaguiThemeBridge>
+            </QueryClientProvider>
           </SafeAreaProvider>
         </KeyboardProvider>
       </GestureHandlerRootView>
