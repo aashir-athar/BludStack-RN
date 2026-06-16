@@ -1,189 +1,65 @@
-// app/(tabs)/_layout.tsx
-// Lever: Fitts's Law + role-aware visibility. The primary action (Request) is
-// always the centre pill so the user's thumb reaches it without re-aiming;
-// secondary tabs flank it. Role determines which tabs render — recipient-only
-// users never see donor-side tabs, and vice versa.
+// Lever: Fitts's Law + role-aware visibility. Request is the primary action;
+// role gates which tabs render so each user only sees their own surface.
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { NativeTabs } from 'expo-router/unstable-native-tabs';
+import { useAppTheme, useIsDark } from '@/stores/themeStore';
+import { useIsDonor } from '@/stores/authStore';
 
-import React from 'react';
-import { Tabs } from 'expo-router';
-import {
-  LayoutAnimation, Platform, Pressable, StyleSheet, Text, UIManager, View,
-} from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '@/contexts/ThemeContext';
-import { useAuth } from '@/contexts/AuthContext';
-import {
-  FontSize, FontWeight, LetterSpacing, Spacing, Radius, Elevation, Motion,
-} from '@/constants/Typography';
+type IoniconName = keyof typeof Ionicons.glyphMap;
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
-
-type Role = 'donor' | 'recipient' | 'all';
-type TabDef = {
-  name: string;
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  iconActive: keyof typeof Ionicons.glyphMap;
-  role: Role;
-  cta?: boolean;
-};
-
-// Visibility rules:
-//   • 'all'        → every authenticated user sees it.
-//   • 'donor'      → donor + both.
-//   • 'recipient'  → recipient + both.
-//
-// `my-requests` is intentionally 'all' even though donor-only is rare here:
-// the Request tab is 'all', so any user who can POST a request must be able
-// to see + manage what they posted. Hiding my-requests from donors created
-// a state where a donor could post and then never reach their post again.
-const ALL_TABS: readonly TabDef[] = [
-  { name: 'index',        label: 'Home',     icon: 'home-outline',    iconActive: 'home',          role: 'donor' },
-  { name: 'request',      label: 'Request',  icon: 'add-circle',      iconActive: 'add-circle',    role: 'all', cta: true },
-  { name: 'donors',       label: 'Find',     icon: 'search-outline',  iconActive: 'search',        role: 'donor' },
-  { name: 'my-requests',  label: 'Requests', icon: 'list-outline',    iconActive: 'list',          role: 'all' },
-  { name: 'history',      label: 'History',  icon: 'heart-outline',   iconActive: 'heart',         role: 'donor' },
-  { name: 'profile',      label: 'Account',  icon: 'person-outline',  iconActive: 'person',        role: 'all' },
-] as const;
-
-// SDK 56: expo-router no longer re-exports react-navigation, so derive the
-// custom tab-bar prop type straight from expo-router's own <Tabs> `tabBar`
-// callback instead of importing @react-navigation/bottom-tabs.
-type TabBarProps = Parameters<NonNullable<React.ComponentProps<typeof Tabs>['tabBar']>>[0];
-
-function CustomTabBar({ state, navigation }: TabBarProps) {
-  const { theme, isDark } = useTheme();
-  const { isDonor, isRecipient } = useAuth();
-  const insets = useSafeAreaInsets();
-
-  const TAB_BAR_HEIGHT = 64;
-
-  const visibleFor = (role: Role) =>
-    role === 'all' || (role === 'donor' && isDonor) || (role === 'recipient' && isRecipient);
-
-  function handlePress(index: number, key: string, name: string) {
-    LayoutAnimation.configureNext({
-      duration: Motion.duration.base,
-      create: { type: 'spring', springDamping: 0.72, property: 'scaleXY' },
-      update: { type: 'spring', springDamping: 0.72 },
-      delete: { type: 'spring', springDamping: 0.72, property: 'scaleXY' },
-    });
-    const event = navigation.emit({ type: 'tabPress', target: key, canPreventDefault: true });
-    if (state.index !== index && !event.defaultPrevented) navigation.navigate(name);
-  }
-
-  return (
-    <View
-      style={[
-        styles.barWrapper,
-        {
-          bottom: Math.max(insets.bottom, Spacing[3]) + Spacing[2],
-          left: Spacing[4],
-          right: Spacing[4],
-          height: TAB_BAR_HEIGHT,
-          backgroundColor: theme.tabBar,
-          borderColor: theme.tabBarBorder,
-        },
-        Elevation.lg,
-      ]}
-    >
-      {state.routes.map((route, index) => {
-        const tab = ALL_TABS.find(t => t.name === route.name);
-        if (!tab || !visibleFor(tab.role)) return null;
-
-        const focused = state.index === index;
-        const isCta   = tab.cta;
-        const iconName = focused ? tab.iconActive : tab.icon;
-
-        const pillBg =
-          isCta   ? theme.primary
-          : isDark ? theme.surface
-          :          theme.textPrimary;
-
-        const pillFg =
-          isCta            ? theme.textOnPrimary
-          : isDark         ? theme.textPrimary
-          :                  theme.surface;
-
-        return (
-          <Pressable
-            key={route.key}
-            onPress={() => handlePress(index, route.key, route.name)}
-            style={[styles.tabItem, focused && styles.tabItemFocused]}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: focused }}
-            accessibilityLabel={tab.label}
-            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-          >
-            {focused ? (
-              <View style={[styles.activePill, { backgroundColor: pillBg }]}>
-                <Ionicons name={iconName} size={18} color={pillFg} />
-                <Text style={[styles.activeLabel, { color: pillFg }]} numberOfLines={1}>
-                  {tab.label}
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.inactiveWrap}>
-                <Ionicons
-                  name={iconName}
-                  size={20}
-                  color={isCta ? theme.primary : theme.tabInactive}
-                />
-                {isCta && <View style={[styles.ctaDot, { backgroundColor: theme.primary }]} />}
-              </View>
-            )}
-          </Pressable>
-        );
-      })}
-    </View>
-  );
+// Outline when idle, filled when selected (Ionicons via the NativeTabs vector bridge).
+function pair(outline: IoniconName, filled: IoniconName) {
+  return {
+    default: <NativeTabs.Trigger.VectorIcon family={Ionicons} name={outline} />,
+    selected: <NativeTabs.Trigger.VectorIcon family={Ionicons} name={filled} />,
+  };
 }
 
 export default function TabsLayout() {
+  const theme = useAppTheme();
+  const isDark = useIsDark();
+  const isDonor = useIsDonor();
+
   return (
-    <Tabs
-      tabBar={props => <CustomTabBar {...props} />}
-      screenOptions={{ headerShown: false }}
+    <NativeTabs
+      tintColor={theme.primary}
+      backgroundColor={theme.tabBar}
+      iconColor={{ default: theme.tabInactive, selected: theme.primary }}
+      labelStyle={{ fontSize: 11, fontWeight: '700', color: theme.tabInactive }}
+      blurEffect={isDark ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
+      minimizeBehavior="onScrollDown"
+      rippleColor={theme.primarySoft}
+      indicatorColor={theme.primarySoft}
     >
-      {ALL_TABS.map(tab => (
-        <Tabs.Screen key={tab.name} name={tab.name} />
-      ))}
-    </Tabs>
+      <NativeTabs.Trigger name="index" hidden={!isDonor}>
+        <NativeTabs.Trigger.Icon src={pair('home-outline', 'home')} />
+        <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="request">
+        <NativeTabs.Trigger.Icon src={pair('add-circle-outline', 'add-circle')} />
+        <NativeTabs.Trigger.Label>Request</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="donors" hidden={!isDonor}>
+        <NativeTabs.Trigger.Icon src={pair('search-outline', 'search')} />
+        <NativeTabs.Trigger.Label>Find</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="my-requests">
+        <NativeTabs.Trigger.Icon src={pair('list-outline', 'list')} />
+        <NativeTabs.Trigger.Label>Requests</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="history" hidden={!isDonor}>
+        <NativeTabs.Trigger.Icon src={pair('heart-outline', 'heart')} />
+        <NativeTabs.Trigger.Label>History</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="profile">
+        <NativeTabs.Trigger.Icon src={pair('person-outline', 'person')} />
+        <NativeTabs.Trigger.Label>Account</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+    </NativeTabs>
   );
 }
-
-const styles = StyleSheet.create({
-  barWrapper: {
-    position: 'absolute',
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: Radius.pill,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: Spacing[2],
-  },
-  tabItem: {
-    flex: 1,
-    height: 64,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tabItemFocused: { flex: 2.4 },
-
-  activePill: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: Spacing[2], height: 44, width: '100%',
-    borderRadius: Radius.pill,
-    paddingHorizontal: Spacing[3],
-  },
-  activeLabel: {
-    fontSize: FontSize.xs,
-    fontWeight: FontWeight.black,
-    letterSpacing: LetterSpacing.snug,
-  },
-
-  inactiveWrap: { alignItems: 'center', justifyContent: 'center', gap: 4 },
-  ctaDot: { width: 4, height: 4, borderRadius: 2, opacity: 0.9 },
-});

@@ -172,14 +172,14 @@ export function initAuth(): () => void {
     useAuthStore.setState({ session: s });
     await fetchProfileInto(s.user.id);
     if (!cancelled) useAuthStore.setState({ loading: false });
-    subscribeProfile(s.user.id, `profile_${s.user.id}`);
+    subscribeProfile(s.user.id, `auth_profile_${s.user.id}`);
   })();
 
   const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
     useAuthStore.setState({ session: s });
     if (s?.user?.id) {
       void fetchProfileInto(s.user.id);
-      subscribeProfile(s.user.id, `profile_${s.user.id}_${s.access_token.slice(-8)}`);
+      subscribeProfile(s.user.id, `auth_profile_${s.user.id}_${s.access_token.slice(-8)}`);
     } else {
       useAuthStore.setState({ profile: null });
       if (profileChannel) { supabase.removeChannel(profileChannel); profileChannel = null; }
