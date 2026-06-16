@@ -162,12 +162,12 @@ export const Colors = {
     inputBorder:    palette.bone300,
     inputFocus:     palette.crimson600,
     inputError:     palette.crimson600,
-    placeholder:    palette.bone500,
+    placeholder:    palette.bone600,
 
     textPrimary:    palette.onyx900,
     textSecondary:  palette.bone800,
     textMuted:      palette.bone600,
-    textTertiary:   palette.bone500,
+    textTertiary:   '#7A756C', // WCAG AA: bone500 failed 3:1 on light bg
     textDisabled:   palette.bone400,
     textInverse:    palette.pure,
     textOnPrimary:  palette.pure,
@@ -181,7 +181,7 @@ export const Colors = {
     success:        palette.saline600,
     successSoft:    palette.saline100,
     successDeep:    palette.saline800,
-    warning:        palette.plasma600,
+    warning:        '#A8620A', // WCAG AA: plasma600 failed 3:1 on light bg
     warningSoft:    palette.plasma100,
     warningDeep:    palette.plasma800,
     danger:         palette.crimson600,
