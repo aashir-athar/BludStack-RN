@@ -10,7 +10,6 @@ import {
   LayoutAnimation, Platform, Pressable, StyleSheet, Text, UIManager, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -50,7 +49,12 @@ const ALL_TABS: readonly TabDef[] = [
   { name: 'profile',      label: 'Account',  icon: 'person-outline',  iconActive: 'person',        role: 'all' },
 ] as const;
 
-function CustomTabBar({ state, navigation }: BottomTabBarProps) {
+// SDK 56: expo-router no longer re-exports react-navigation, so derive the
+// custom tab-bar prop type straight from expo-router's own <Tabs> `tabBar`
+// callback instead of importing @react-navigation/bottom-tabs.
+type TabBarProps = Parameters<NonNullable<React.ComponentProps<typeof Tabs>['tabBar']>>[0];
+
+function CustomTabBar({ state, navigation }: TabBarProps) {
   const { theme, isDark } = useTheme();
   const { isDonor, isRecipient } = useAuth();
   const insets = useSafeAreaInsets();

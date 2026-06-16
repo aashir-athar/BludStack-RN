@@ -852,7 +852,7 @@ const styles = StyleSheet.create({
   notesText:  { fontSize: FontSize.sm, lineHeight: 20 },
 
   mapCard:    { borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden', height: 180 },
-  map:        { ...StyleSheet.absoluteFillObject },
+  map:        { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   mapMarker: {
     width: 32, height: 32, borderRadius: Radius.pill,
     alignItems: 'center', justifyContent: 'center',

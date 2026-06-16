@@ -12,7 +12,7 @@
 import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useState,
 } from 'react';
-import { Appearance, type ColorSchemeName } from 'react-native';
+import { Appearance } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, ThemeColors } from '@/constants/Colors';
 
@@ -29,9 +29,13 @@ interface ThemeContextValue {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 const STORAGE_KEY = 'bludstack_theme_mode';
 
-function readSystem(): ColorSchemeName {
-  // Direct read — works even when useColorScheme() hasn't ticked yet.
-  return Appearance.getColorScheme();
+type SystemScheme = 'light' | 'dark';
+
+function readSystem(): SystemScheme {
+  // Direct, synchronous read. Unknown (null/undefined — e.g. Expo Go on Android
+  // before the OS reports) defaults to dark: matches the brand palette and
+  // avoids a light flash on a dark device. (RN 0.85 narrowed getColorScheme().)
+  return Appearance.getColorScheme() === 'light' ? 'light' : 'dark';
 }
 
 // System-follows-device is the default — user's call. Profile → Appearance
@@ -40,12 +44,12 @@ const DEFAULT_MODE: ThemeMode = 'system';
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [mode, setModeState] = useState<ThemeMode>(DEFAULT_MODE);
-  const [systemScheme, setSystemScheme] = useState<ColorSchemeName>(readSystem());
+  const [systemScheme, setSystemScheme] = useState<SystemScheme>(readSystem());
 
   // ── Subscribe to OS appearance changes so 'system' tracks live ───────────
   useEffect(() => {
     const sub = Appearance.addChangeListener(({ colorScheme }) => {
-      setSystemScheme(colorScheme);
+      setSystemScheme(colorScheme === 'light' ? 'light' : 'dark');
     });
     // One more re-read in case the OS reported between mount and subscription
     setSystemScheme(readSystem());
@@ -77,7 +81,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const isDark = useMemo(() => {
     if (mode === 'dark')  return true;
     if (mode === 'light') return false;
-    if (systemScheme == null) return true; // null / undefined → dark default
     return systemScheme === 'dark';
   }, [mode, systemScheme]);
 
