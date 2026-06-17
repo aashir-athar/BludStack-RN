@@ -1,759 +1,468 @@
-// app/donor/[id].tsx
-// Donor profile modal — shown when tapping a donor's card.
-// Displays full profile, blood compatibility, donation history,
-// active/past requests they've responded to, and contact actions.
-
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import {
-    View, Text, ScrollView, StyleSheet,
-    TouchableOpacity, Alert, Linking, Animated,
-} from 'react-native';
+// Lever: trust signals + reciprocity. Verified tick, donation count, and a clear
+// "can donate to me" verdict earn trust; "they showed up before" invites you to
+// show up too. Contact opens only through a real match, never cold.
+import React from 'react';
+import { Linking, ScrollView, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { useTheme } from '@/contexts/ThemeContext';
-import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/utils/supabase';
-import { useLocation } from '@/hooks/useLocation';
-import BloodGroupBadge from '@/components/BloodGroupBadge';
-import Button from '@/components/Button';
-import LoadingScreen from '@/components/LoadingScreen';
-import { FontSize, FontWeight, Spacing, Radius, LetterSpacing } from '@/constants/Typography';
-import { COMPATIBILITY_MAP, BloodGroup } from '@/constants/BloodData';
-import { formatDate, canDonateAgain, timeAgo } from '@/utils/helpers';
-import { haversineDistance, formatDistance, estimateDriveMinutes } from '@/utils/geo';
+import { useAppTheme } from '@/stores/themeStore';
+import { useAuth } from '@/stores/authStore';
+import { useToast } from '@/stores/toastStore';
+import { useProfileById } from '@/queries/profiles';
+import { DONOR_FOR_RECIPIENT, type BloodGroup } from '@/constants/BloodData';
+import { Spacing, Radius } from '@/constants/Typography';
+import { canDonateAgain, formatDate, timeAgo } from '@/utils/helpers';
+import {
+  Text,
+  Card,
+  Button,
+  Skeleton,
+  BloodGroupBadge,
+  EmptyState,
+  ScreenHeader,
+} from '@/ui';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
+// Public-safe shape from GET /profiles/:id. The endpoint masks phone, address
+// and exact location, so phone/whatsapp_available are optional: they only carry
+// a value when the caller hands us a matched-thread profile.
 interface DonorProfile {
-    id: string;
-    full_name: string;
-    email: string;
-    phone: string | null;
-    blood_group: string;
-    avatar_url: string | null;
-    is_verified: boolean;
-    is_available_to_donate: boolean;
-    last_donation_date: string | null;
-    total_donations: number;
-    share_medical_history: boolean;
-    medical_conditions: string[];
-    latitude: number | null;
-    longitude: number | null;
-    address: string | null;
-    created_at: string;
+  id: string;
+  full_name: string;
+  blood_group: string;
+  gender?: string | null;
+  avatar_url?: string | null;
+  is_verified?: boolean;
+  is_available_to_donate?: boolean;
+  last_donation_date?: string | null;
+  total_donations?: number;
+  share_medical_history?: boolean;
+  medical_conditions?: string[];
+  created_at?: string;
+  phone?: string | null;
+  whatsapp_available?: boolean;
 }
 
-interface DonorResponse {
-    id: string;
-    status: 'pending' | 'accepted' | 'declined' | 'completed';
-    created_at: string;
-    blood_request: {
-        id: string;
-        blood_group: string;
-        urgency: string;
-        hospital_name: string;
-        hospital_address: string;
-        status: string;
-        created_at: string;
-    } | null;
+function initialsOf(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? '')
+    .join('');
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-// Tone keys resolved through the theme inside the component (see toneColor()).
-type ToneKey = 'success' | 'warning' | 'danger' | 'muted';
-const URGENCY_TONE: Record<string, ToneKey> = {
-    critical: 'danger',
-    urgent:   'warning',
-    standard: 'success',
-};
+// Reciprocity-tinted micro-copy: lead with what the donor has given.
+function donationLine(count: number): string {
+  if (count <= 0) return 'No donations recorded yet';
+  if (count === 1) return 'Gave blood once before';
+  return `Gave blood ${count} times before`;
+}
 
-const RESPONSE_STATUS_CONFIG: Record<string, { label: string; tone: ToneKey }> = {
-    pending:   { label: 'Pending',   tone: 'warning' },
-    accepted:  { label: 'Accepted',  tone: 'success' },
-    declined:  { label: 'Declined',  tone: 'muted'   },
-    completed: { label: 'Completed', tone: 'success' },
-};
+export default function DonorProfileScreen() {
+  const { id, requestId } = useLocalSearchParams<{ id: string; requestId?: string }>();
+  const theme = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const toast = useToast();
+  const { user, profile: myProfile, isRecipient } = useAuth();
 
-// ─── Screen ──────────────────────────────────────────────────────────────────
+  const { data, isLoading } = useProfileById(id);
+  const donor = (data as DonorProfile | undefined) ?? null;
 
-export default function DonorDetailScreen() {
-    // Accepts an optional `requestId` query param so the Message button can
-    // open the in-app chat scoped to the right thread when navigated from a
-    // specific request detail screen. When absent, we discover the most
-    // recent accepted/completed response between the viewer and this donor
-    // (or vice-versa) and scope the chat to that request.
-    const { id, requestId: passedRequestId } = useLocalSearchParams<{
-        id: string;
-        requestId?: string;
-    }>();
-    const { theme, isDark } = useTheme();
-    const { user, profile: myProfile } = useAuth();
-    const router = useRouter();
-    const insets = useSafeAreaInsets();
-    const { location } = useLocation(false);
+  const goBack = () => {
+    void Haptics.selectionAsync();
+    router.back();
+  };
 
-    const [donor, setDonor] = useState<DonorProfile | null>(null);
-    const [responses, setResponses] = useState<DonorResponse[]>([]);
-    const [loading, setLoading] = useState(true);
-    // Resolved request_id for the chat thread. Either the one passed via
-    // query param, or discovered from a recent mutual-commitment response.
-    const [chatRequestId, setChatRequestId] = useState<string | null>(
-        passedRequestId ?? null,
-    );
-    // Whether the mutual-commitment request is STILL `active`. Call, WhatsApp
-    // and Chat all close together once the request flips to fulfilled /
-    // cancelled / expired — consistent with the closed-state banner in
-    // request/[id].tsx + chat.tsx. Null while we're still loading.
-    const [commitmentActive, setCommitmentActive] = useState<boolean | null>(null);
-
-    // Subtle entrance animation for the avatar
-    const fadeAnim = useRef(new Animated.Value(0)).current;
-    const slideAnim = useRef(new Animated.Value(24)).current;
-
-    useEffect(() => {
-        if (!loading && donor) {
-            Animated.parallel([
-                Animated.timing(fadeAnim, { toValue: 1, duration: 340, useNativeDriver: true }),
-                Animated.spring(slideAnim, { toValue: 0, speed: 14, bounciness: 4, useNativeDriver: true }),
-            ]).start();
-        }
-    }, [loading, donor]);
-
-    // ── Fetch donor profile ──────────────────────────────────────────────────
-    const fetchDonor = useCallback(async () => {
-        if (!id) return;
-        try {
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', id)
-                .single();
-            if (error) throw error;
-            setDonor(data as DonorProfile);
-        } catch (e: any) {
-            Alert.alert('Error', e.message ?? 'Failed to load donor profile.');
-        }
-    }, [id]);
-
-    // ── Fetch donor's response history (only if viewing own profile or
-    //    the donor has accepted a request where I am the recipient) ──────────
-    const fetchResponses = useCallback(async () => {
-        if (!id || !user?.id) return;
-        try {
-            const { data, error } = await supabase
-                .from('request_responses')
-                .select(`
-          id, status, created_at,
-          blood_request:blood_requests!request_id (
-            id, blood_group, urgency,
-            hospital_name, hospital_address,
-            status, created_at
-          )
-        `)
-                .eq('donor_id', id)
-                .in('status', ['accepted', 'completed'])
-                .order('created_at', { ascending: false })
-                .limit(10);
-            if (error) throw error;
-            setResponses((data as any[]) ?? []);
-        } catch (e: any) {
-            console.warn('[DonorDetail fetchResponses]', e.message);
-        }
-    }, [id, user?.id]);
-
-    useEffect(() => {
-        if (!id) return;
-        Promise.all([fetchDonor(), fetchResponses()]).finally(() => setLoading(false));
-    }, [id]);
-
-    // Discover a chat thread between the viewer and this profile.
-    // Looks for any accepted/completed response on either side and uses the
-    // most recent one. Also reads the parent request's `status` so we can
-    // close Call / WhatsApp / Chat when the request is no longer active.
-    // The mutual-commitment RLS policy makes both reads safe.
-    useEffect(() => {
-        if (!user?.id || !id || user.id === id) return;
-        let cancelled = false;
-
-        const resolveActiveFor = async (rid: string) => {
-            const { data: br } = await supabase
-                .from('blood_requests')
-                .select('status')
-                .eq('id', rid)
-                .maybeSingle();
-            if (cancelled) return;
-            setCommitmentActive(br?.status === 'active');
-        };
-
-        (async () => {
-            try {
-                // If the caller passed a requestId, use it directly.
-                if (passedRequestId) {
-                    setChatRequestId(passedRequestId);
-                    await resolveActiveFor(passedRequestId);
-                    return;
-                }
-
-                // Path A: this profile is a donor who accepted MY (viewer = recipient's) request
-                const { data: aData } = await supabase
-                    .from('request_responses')
-                    .select('request_id, created_at, blood_requests!inner(recipient_id)')
-                    .eq('donor_id', id)
-                    .in('status', ['accepted', 'completed'])
-                    .eq('blood_requests.recipient_id', user.id)
-                    .order('created_at', { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-
-                if (cancelled) return;
-                if ((aData as any)?.request_id) {
-                    const rid: string = (aData as any).request_id;
-                    setChatRequestId(rid);
-                    await resolveActiveFor(rid);
-                    return;
-                }
-
-                // Path B: I (viewer = donor) accepted THIS profile's (recipient's) request
-                const { data: bData } = await supabase
-                    .from('request_responses')
-                    .select('request_id, created_at, blood_requests!inner(recipient_id)')
-                    .eq('donor_id', user.id)
-                    .in('status', ['accepted', 'completed'])
-                    .eq('blood_requests.recipient_id', id)
-                    .order('created_at', { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-
-                if (cancelled) return;
-                if ((bData as any)?.request_id) {
-                    const rid: string = (bData as any).request_id;
-                    setChatRequestId(rid);
-                    await resolveActiveFor(rid);
-                    return;
-                }
-
-                // No mutual commitment found at all → no active channel.
-                setCommitmentActive(false);
-            } catch (e: any) {
-                if (!cancelled) console.warn('[DonorDetail chat-thread]', e?.message);
-            }
-        })();
-        return () => { cancelled = true; };
-    }, [passedRequestId, user?.id, id]);
-
-    // Watch the discovered request's status so the contact channels close
-    // the moment it flips to fulfilled / cancelled / expired without the
-    // user navigating away and back.
-    useEffect(() => {
-        if (!chatRequestId) return;
-        const ch = supabase
-            .channel(`donor_detail_req_${chatRequestId}_${Date.now()}`)
-            .on('postgres_changes', {
-                event: 'UPDATE', schema: 'public',
-                table: 'blood_requests',
-                filter: `id=eq.${chatRequestId}`,
-            }, (payload: any) => {
-                const s = payload?.new?.status;
-                if (s !== undefined) setCommitmentActive(s === 'active');
-            })
-            .subscribe();
-        return () => { supabase.removeChannel(ch); };
-    }, [chatRequestId]);
-
-    // ── Derived values ───────────────────────────────────────────────────────
-    const isOwnProfile = user?.id === id;
-
-    const { canDonate, daysLeft } = donor
-        ? canDonateAgain(donor.last_donation_date)
-        : { canDonate: false, daysLeft: 0 };
-
-    const available = donor?.is_available_to_donate && canDonate;
-    const statusColor = available ? theme.success : theme.warning;
-
-    const distance = location && donor?.latitude && donor?.longitude
-        ? haversineDistance(location.latitude, location.longitude, donor.latitude, donor.longitude)
-        : null;
-
-    // Blood compatibility — can this donor donate to me?
-    const myBloodGroup = myProfile?.blood_group as BloodGroup | undefined;
-    const donorBloodGroup = donor?.blood_group as BloodGroup | undefined;
-    const canDonateToMe = myBloodGroup && donorBloodGroup
-        ? (COMPATIBILITY_MAP[donorBloodGroup] ?? []).includes(myBloodGroup)
-        : null;
-
-    const initials = donor?.full_name
-        .split(' ')
-        .slice(0, 2)
-        .map(n => n[0]?.toUpperCase() ?? '')
-        .join('') ?? '';
-
-    // Channels are open ONLY while the mutual-commitment request is active.
-    // Once it flips to fulfilled / cancelled / expired, Call + WhatsApp +
-    // Chat all close together — consistent with the closed-state banner in
-    // request/[id].tsx and the chat composer in chat.tsx.
-    const channelsOpen = commitmentActive === true;
-
-    // ── Contact actions ──────────────────────────────────────────────────────
-    // Call uses ONLY the phone column. Email is never a contact channel —
-    // users coordinate via Phone, WhatsApp (when the other party has
-    // whatsapp_available toggled on), or in-app Chat.
-    const handleCall = useCallback(() => {
-        if (!donor) return;
-        if (!channelsOpen) {
-            Alert.alert('Channel closed', 'This request is no longer active. Call, WhatsApp and chat are closed.');
-            return;
-        }
-        if (!donor.phone) {
-            Alert.alert('No phone shared', "This user hasn't added a phone number. Use chat to reach them.");
-            return;
-        }
-        Haptics.selectionAsync().catch(() => {});
-        Linking.openURL(`tel:${donor.phone}`);
-    }, [donor, channelsOpen]);
-
-    // In-app chat — NEVER email. Chat threads are scoped to a request_id so
-    // both parties open the same conversation that lives behind the existing
-    // mutual-commitment RLS. If no chat thread is discoverable, we tell the
-    // user up-front instead of silently opening a broken composer.
-    const handleMessage = useCallback(() => {
-        if (!donor || !user?.id) return;
-        if (user.id === donor.id) return; // can't message yourself
-        if (!channelsOpen) {
-            Alert.alert('Channel closed', 'This request is no longer active. Chat is closed.');
-            return;
-        }
-        // From here on, follow the existing chatRequestId flow.
-        if (!chatRequestId) {
-            Alert.alert(
-                'No active thread yet',
-                "Chat opens once you've accepted each other through a request. Accept or post one to start a conversation.",
-            );
-            return;
-        }
-        Haptics.selectionAsync().catch(() => {});
-        router.push({
-            pathname: '/chat',
-            params: {
-                requestId:    String(chatRequestId),
-                receiverId:   donor.id,
-                receiverName: encodeURIComponent(donor.full_name ?? 'Donor'),
-            },
-        });
-    }, [donor, user?.id, chatRequestId, router, channelsOpen]);
-
-    const handleOpenMap = useCallback(() => {
-        if (!donor?.latitude || !donor?.longitude) return;
-        Haptics.selectionAsync().catch(() => {});
-        Linking.openURL(
-            `https://www.google.com/maps/dir/?api=1&destination=${donor.latitude},${donor.longitude}&travelmode=driving`
-        );
-    }, [donor]);
-
-    // ─────────────────────────────────────────────────────────────────────────
-
-    if (loading) return <LoadingScreen message="Loading profile…" />;
-    if (!donor) return null;
-
+  // ── Loading ────────────────────────────────────────────────────────────────
+  if (isLoading) {
     return (
-        <SafeAreaView style={[styles.root, { backgroundColor: theme.background }]}>
+      <View style={[styles.root, { backgroundColor: theme.background }]}>
+        <ScreenHeader title="Donor" onBack={goBack} />
+        <View style={{ padding: Spacing[5], gap: Spacing[4] }}>
+          <Card variant="elevated" style={{ alignItems: 'center', gap: Spacing[4] }}>
+            <Skeleton width={96} height={96} radius={Radius.pill} />
+            <Skeleton width={180} height={22} radius={Radius.sm} />
+            <Skeleton width={120} height={14} radius={Radius.sm} />
+            <Skeleton width="100%" height={56} radius={Radius.lg} />
+          </Card>
+          <Skeleton width="100%" height={84} radius={Radius.lg} />
+          <Skeleton width="100%" height={120} radius={Radius.lg} />
+        </View>
+      </View>
+    );
+  }
 
-            {/* ── Top bar ── */}
-            <View style={[styles.topBar, {
-                paddingTop: Spacing[2],
-                backgroundColor: theme.surface,
-                borderBottomColor: theme.border,
-            }]}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.closeBtn} activeOpacity={0.7}>
-                    <Text style={[styles.closeIcon, { color: theme.textPrimary }]}>←</Text>
-                </TouchableOpacity>
-                <Text style={[styles.topTitle, { color: theme.textPrimary }]}>Donor Profile</Text>
-                {/* Availability dot */}
-                <View style={[styles.statusDotSmall, { backgroundColor: statusColor }]} />
+  // ── Not found ──────────────────────────────────────────────────────────────
+  if (!donor) {
+    return (
+      <View style={[styles.root, { backgroundColor: theme.background }]}>
+        <ScreenHeader title="Donor" onBack={goBack} />
+        <View style={styles.emptyWrap}>
+          <EmptyState
+            icon="person-remove-outline"
+            title="We couldn't find this donor"
+            body="The profile may have been removed, or the link is out of date. Head back and try another donor."
+            actionLabel="Go back"
+            onAction={goBack}
+          />
+        </View>
+      </View>
+    );
+  }
+
+  // ── Derived (plain derivations, the compiler memoizes) ──────────────────────
+  const isOwnProfile = user?.id === donor.id;
+  const totalDonations = donor.total_donations ?? 0;
+  const { canDonate, daysLeft } = canDonateAgain(donor.last_donation_date ?? null);
+  const available = (donor.is_available_to_donate ?? false) && canDonate;
+
+  const statusLabel = available
+    ? 'Available to donate'
+    : daysLeft > 0
+      ? `Eligible again in ${daysLeft} ${daysLeft === 1 ? 'day' : 'days'}`
+      : 'Resting right now';
+  const statusTone: 'success' | 'warning' = available ? 'success' : 'warning';
+  const statusColor = available ? theme.success : theme.warning;
+
+  // Reciprocity verdict: can THIS donor give to ME? Uses my recipient group.
+  const myGroup = myProfile?.blood_group as BloodGroup | undefined;
+  const theirGroup = donor.blood_group as BloodGroup | undefined;
+  const compatible =
+    myGroup && theirGroup
+      ? (DONOR_FOR_RECIPIENT[myGroup] ?? []).includes(theirGroup)
+      : null;
+
+  const conditions = donor.share_medical_history ? donor.medical_conditions ?? [] : [];
+
+  // Contact gate: only a recipient, never your own profile, and only once the
+  // donor row actually carries a phone (the public endpoint masks it, so this
+  // stays true only inside a matched-thread context). Falls back to an honest
+  // note when no channel is open yet.
+  const phone = donor.phone?.trim() || null;
+  const showContact = isRecipient && !isOwnProfile;
+  const canCall = !!phone;
+
+  const onCall = () => {
+    if (!phone) return;
+    void Haptics.selectionAsync();
+    void Linking.openURL(`tel:${phone}`).catch(() =>
+      toast.error("Couldn't open the dialer", { description: 'Try calling from your phone app.' }),
+    );
+  };
+
+  const onWhatsApp = () => {
+    if (!phone) return;
+    void Haptics.selectionAsync();
+    const digits = phone.replace(/[^\d]/g, '');
+    void Linking.openURL(`https://wa.me/${digits}`).catch(() =>
+      toast.error("Couldn't open WhatsApp", { description: 'Make sure WhatsApp is installed.' }),
+    );
+  };
+
+  const onMessage = () => {
+    if (!requestId) {
+      toast.info('Chat opens after a match', {
+        description: 'Accept each other through a request to start the conversation.',
+      });
+      return;
+    }
+    void Haptics.selectionAsync();
+    router.push({
+      pathname: '/chat',
+      params: {
+        requestId: String(requestId),
+        receiverId: donor.id,
+        receiverName: encodeURIComponent(donor.full_name ?? 'Donor'),
+      },
+    });
+  };
+
+  return (
+    <View style={[styles.root, { backgroundColor: theme.background }]}>
+      <ScreenHeader title="Donor" onBack={goBack} />
+
+      <ScrollView
+        contentContainerStyle={[
+          styles.scroll,
+          { paddingBottom: insets.bottom + Spacing[10] },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* ── Hero ── */}
+        <Card variant="elevated" style={{ alignItems: 'center', gap: Spacing[4] }}>
+          <View style={styles.avatarWrap}>
+            <View
+              style={[
+                styles.avatarRing,
+                { borderColor: statusColor, backgroundColor: theme.primaryGhost },
+              ]}
+            >
+              {donor.avatar_url ? (
+                <Image
+                  source={donor.avatar_url}
+                  style={styles.avatar}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  transition={150}
+                />
+              ) : (
+                <Text variant="headline" tone="brand">
+                  {initialsOf(donor.full_name)}
+                </Text>
+              )}
+            </View>
+            <View
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              style={[
+                styles.statusDot,
+                { backgroundColor: statusColor, borderColor: theme.cardElevated },
+              ]}
+            />
+          </View>
+
+          <View style={{ alignItems: 'center', gap: Spacing[1] }}>
+            <View style={styles.nameRow}>
+              <Text variant="title" numberOfLines={1} style={{ flexShrink: 1, textAlign: 'center' }}>
+                {donor.full_name}
+              </Text>
+              {donor.is_verified ? (
+                <Ionicons name="checkmark-circle" size={20} color={theme.success} />
+              ) : null}
             </View>
 
-            <ScrollView
-                contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + Spacing[10] }]}
-                showsVerticalScrollIndicator={false}
-            >
+            <View style={styles.statusRow}>
+              <View style={[styles.statusPip, { backgroundColor: statusColor }]} />
+              <Text variant="labelSm" tone={statusTone}>
+                {statusLabel}
+              </Text>
+            </View>
+          </View>
 
-                {/* ── Hero card ── */}
-                <Animated.View style={[
-                    styles.heroCard,
-                    { backgroundColor: theme.card, borderColor: theme.border },
-                    { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
-                ]}>
-                    {/* Avatar */}
-                    <View style={styles.avatarRow}>
-                        <View style={[styles.avatarRing, { borderColor: statusColor }]}>
-                            {donor.avatar_url ? (
-                                <Image
-                                    source={{ uri: donor.avatar_url }}
-                                    style={styles.avatar}
-                                    contentFit="cover"
-                                />
-                            ) : (
-                                <View style={[styles.avatarFallback, { backgroundColor: theme.cardElevated }]}>
-                                    <Text style={[styles.initials, { color: theme.textPrimary }]}>{initials}</Text>
-                                </View>
-                            )}
-                        </View>
-                        {/* Status dot on avatar */}
-                        <View style={[styles.avatarStatusDot, { backgroundColor: statusColor, borderColor: theme.card }]} />
-                    </View>
+          <BloodGroupBadge group={donor.blood_group} size="lg" />
 
-                    {/* Name + verified + blood group */}
-                    <View style={styles.heroMeta}>
-                        <View style={styles.nameRow}>
-                            <Text style={[styles.heroName, { color: theme.textPrimary }]} numberOfLines={1}>
-                                {donor.full_name}
-                            </Text>
-                            {donor.is_verified && (
-                                <View style={[styles.verifiedBadge, { backgroundColor: theme.successSoft }]}>
-                                    <Ionicons name="checkmark-circle" size={12} color={theme.success} />
-                                    <Text style={[styles.verifiedText, { color: theme.success }]}>Verified</Text>
-                                </View>
-                            )}
-                        </View>
-
-                        <Text style={[styles.availabilityText, { color: statusColor }]}>
-                            {available
-                                ? '● Available to donate'
-                                : daysLeft > 0
-                                    ? `● Eligible in ${daysLeft} days`
-                                    : '● Currently unavailable'}
-                        </Text>
-
-                        {donor.address && (
-                            <Text style={[styles.addressText, { color: theme.textMuted }]} numberOfLines={1}>
-                                {donor.address}
-                            </Text>
-                        )}
-                    </View>
-
-                    <BloodGroupBadge bloodGroup={donor.blood_group} size="xl" inverted style={styles.bloodBadge} />
-
-                    {/* Stats row */}
-                    <View style={[styles.statsRow, { borderTopColor: theme.border }]}>
-                        <StatCell
-                            value={String(donor.total_donations)}
-                            label="DONATIONS"
-                            color={theme.textPrimary}
-                            theme={theme}
-                        />
-                        <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
-                        <StatCell
-                            value={donor.last_donation_date ? timeAgo(donor.last_donation_date) : 'Never'}
-                            label="LAST DONATED"
-                            color={theme.textPrimary}
-                            theme={theme}
-                        />
-                        {distance !== null && (
-                            <>
-                                <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
-                                <StatCell
-                                    value={formatDistance(distance)}
-                                    label="AWAY"
-                                    color={theme.textPrimary}
-                                    theme={theme}
-                                />
-                            </>
-                        )}
-                    </View>
-                </Animated.View>
-
-                {/* ── Compatibility banner ── */}
-                {!isOwnProfile && canDonateToMe !== null && (
-                    <View style={[
-                        styles.compatBanner,
-                        {
-                            backgroundColor: canDonateToMe ? '#00A65112' : '#E8002D0A',
-                            borderColor: canDonateToMe ? '#00A65130' : '#E8002D25',
-                        },
-                    ]}>
-                        <Ionicons
-                            name={canDonateToMe ? 'checkmark-circle' : 'warning'}
-                            size={22}
-                            color={canDonateToMe ? theme.success : theme.warning}
-                        />
-                        <Text style={[styles.compatText, { color: theme.textSecondary }]}>
-                            {canDonateToMe
-                                ? `${donor.blood_group} is compatible with your blood group (${myBloodGroup}). This donor can donate to you.`
-                                : `${donor.blood_group} may not be compatible with your blood group (${myBloodGroup}). Verify with hospital staff.`}
-                        </Text>
-                    </View>
-                )}
-
-                {/* ── Distance / ETA ── */}
-                {distance !== null && (
-                    <View style={[styles.etaCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                        <View style={styles.etaInner}>
-                            <View style={styles.etaStat}>
-                                <Text style={[styles.etaValue, { color: theme.textPrimary }]}>{formatDistance(distance)}</Text>
-                                <Text style={[styles.etaLabel, { color: theme.textMuted }]}>DISTANCE</Text>
-                            </View>
-                            <View style={[styles.etaDivider, { backgroundColor: theme.border }]} />
-                            <View style={styles.etaStat}>
-                                <Text style={[styles.etaValue, { color: theme.textPrimary }]}>{estimateDriveMinutes(distance)} min</Text>
-                                <Text style={[styles.etaLabel, { color: theme.textMuted }]}>EST. DRIVE</Text>
-                            </View>
-                            <TouchableOpacity
-                                onPress={handleOpenMap}
-                                style={[styles.dirBtn, { backgroundColor: theme.primary }]}
-                                activeOpacity={0.8}
-                            >
-                                <Text style={styles.dirBtnText}>Directions →</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                )}
-
-                {/* ── Medical history ── */}
-                {donor.share_medical_history && (donor.medical_conditions?.length ?? 0) > 0 && (
-                    <SectionCard title="🩺 DISCLOSED CONDITIONS" theme={theme}>
-                        <View style={styles.tags}>
-                            {donor.medical_conditions.map(c => (
-                                <View key={c} style={[styles.tag, { backgroundColor: theme.cardElevated }]}>
-                                    <Text style={[styles.tagText, { color: theme.textSecondary }]}>{c}</Text>
-                                </View>
-                            ))}
-                        </View>
-                    </SectionCard>
-                )}
-
-                {/* ── Donation history (accepted/completed responses) ── */}
-                {responses.length > 0 && (
-                    <SectionCard
-                        title={`Donation history  ·  ${responses.length} record${responses.length !== 1 ? 's' : ''}`}
-                        theme={theme}
-                    >
-                        {responses.map(resp => {
-                            const req = resp.blood_request;
-                            if (!req) return null;
-                            const statusCfg = RESPONSE_STATUS_CONFIG[resp.status] ?? { label: resp.status, tone: 'muted' as const };
-                            const urgencyTone = URGENCY_TONE[req.urgency] ?? 'danger';
-                            const toneColor = (t: ToneKey) =>
-                                t === 'success' ? theme.success
-                                : t === 'warning' ? theme.warning
-                                : t === 'danger'  ? theme.danger
-                                :                   theme.textMuted;
-                            const statusColor  = toneColor(statusCfg.tone);
-                            const urgencyColor = toneColor(urgencyTone);
-                            return (
-                                <TouchableOpacity
-                                    key={resp.id}
-                                    onPress={() => router.push({ pathname: '/request/[id]', params: { id: req.id } })}
-                                    activeOpacity={0.75}
-                                >
-                                    <View style={[styles.historyRow, { backgroundColor: theme.cardElevated, borderColor: theme.border }]}>
-                                        <BloodGroupBadge bloodGroup={req.blood_group} size="sm" variant="solid" />
-                                        <View style={styles.historyMeta}>
-                                            <Text style={[styles.historyHospital, { color: theme.textPrimary }]} numberOfLines={1}>
-                                                {req.hospital_name}
-                                            </Text>
-                                            <Text style={[styles.historyAddr, { color: theme.textMuted }]} numberOfLines={1}>
-                                                {req.hospital_address}
-                                            </Text>
-                                            <Text style={[styles.historyTime, { color: theme.textMuted }]}>
-                                                {timeAgo(resp.created_at)}
-                                            </Text>
-                                        </View>
-                                        <View style={styles.historyRight}>
-                                            <View style={[styles.urgencyPip, { backgroundColor: urgencyColor }]} />
-                                            <View style={[styles.statusPill, { backgroundColor: statusColor + '22', borderColor: statusColor }]}>
-                                                <Text style={[styles.statusPillText, { color: statusColor }]}>
-                                                    {statusCfg.label}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                    </View>
-                                </TouchableOpacity>
-                            );
-                        })}
-                    </SectionCard>
-                )}
-
-                {/* ── Member since ── */}
-                <View style={[styles.memberRow, { borderColor: theme.border }]}>
-                    <Text style={[styles.memberText, { color: theme.textMuted }]}>
-                        Member since {formatDate(donor.created_at)}
-                    </Text>
+          {/* Trust stats row */}
+          <View style={[styles.statsRow, { borderTopColor: theme.border }]}>
+            <View style={styles.statCell}>
+              <Text variant="title" style={{ fontVariant: ['tabular-nums'] }}>
+                {totalDonations}
+              </Text>
+              <Text variant="overline" tone="muted">
+                Donations
+              </Text>
+            </View>
+            <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
+            <View style={styles.statCell}>
+              <Text variant="titleSm" numberOfLines={1}>
+                {donor.last_donation_date ? timeAgo(donor.last_donation_date) : 'Never'}
+              </Text>
+              <Text variant="overline" tone="muted">
+                Last donated
+              </Text>
+            </View>
+            {donor.is_verified ? (
+              <>
+                <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
+                <View style={styles.statCell}>
+                  <Ionicons name="shield-checkmark" size={22} color={theme.success} />
+                  <Text variant="overline" tone="muted">
+                    Verified
+                  </Text>
                 </View>
+              </>
+            ) : null}
+          </View>
+        </Card>
 
-                {/* ── Contact actions ──
-                    Call + Message are open only while the mutual-commitment
-                    request is still active. After fulfillment / cancellation
-                    / expiry, the buttons are disabled and a soft banner
-                    explains why — matches the closed-state behaviour on
-                    request/[id].tsx and chat.tsx. */}
-                {!isOwnProfile && (
-                    <View style={styles.actionWrap}>
-                        {commitmentActive === false && (
-                            <View style={[styles.liveWaitPill, { backgroundColor: theme.cardElevated, borderColor: theme.border }]}>
-                                <View style={[styles.liveWaitDot, { backgroundColor: theme.textMuted }]} />
-                                <Text style={[styles.liveWaitText, { color: theme.textMuted }]} numberOfLines={2}>
-                                    Channels closed — this request is no longer active.
-                                </Text>
-                            </View>
-                        )}
-                        <Button
-                            label="Call"
-                            icon={<Ionicons name="call" size={16} color={theme.textOnPrimary} />}
-                            variant="primary"
-                            size="lg"
-                            onPress={handleCall}
-                            disabled={!channelsOpen}
-                            fullWidth
-                        />
-                        <Button
-                            label="Message"
-                            icon={<Ionicons name="chatbubble-ellipses-outline" size={16} color={theme.textPrimary} />}
-                            variant="outline"
-                            size="md"
-                            onPress={handleMessage}
-                            disabled={!channelsOpen}
-                            fullWidth
-                        />
-                    </View>
-                )}
+        {/* ── Compatibility verdict (reciprocity hook) ── */}
+        {!isOwnProfile && compatible !== null ? (
+          <Card
+            variant="surface"
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: Spacing[3],
+              backgroundColor: compatible ? theme.successSoft : theme.warningSoft,
+              borderColor: compatible ? theme.success : theme.warning,
+            }}
+          >
+            <Ionicons
+              name={compatible ? 'checkmark-circle' : 'alert-circle'}
+              size={26}
+              color={compatible ? theme.success : theme.warning}
+            />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text variant="label" tone={compatible ? 'success' : 'warning'}>
+                {compatible ? 'Can donate to me' : 'Cannot donate to my blood group'}
+              </Text>
+              <Text variant="caption" tone="secondary">
+                {compatible
+                  ? `${donor.blood_group} is compatible with your ${myGroup}. If they show up, your need is covered.`
+                  : `${donor.blood_group} is not a match for your ${myGroup}. Confirm with hospital staff before relying on it.`}
+              </Text>
+            </View>
+          </Card>
+        ) : null}
 
-            </ScrollView>
-        </SafeAreaView>
-    );
+        {/* ── Reciprocity line: what they have given ── */}
+        <Card variant="surface" style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[3] }}>
+          <View style={[styles.iconCircle, { backgroundColor: theme.primaryGhost }]}>
+            <Ionicons name="water" size={20} color={theme.primary} />
+          </View>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text variant="label">{donationLine(totalDonations)}</Text>
+            {donor.created_at ? (
+              <Text variant="caption" tone="muted">
+                On BludStack since {formatDate(donor.created_at)}
+              </Text>
+            ) : null}
+          </View>
+        </Card>
+
+        {/* ── Disclosed conditions (recent activity / trust) ── */}
+        {conditions.length > 0 ? (
+          <Card variant="surface" style={{ gap: Spacing[3] }}>
+            <Text variant="overline" tone="muted">
+              Shared health notes
+            </Text>
+            <View style={styles.tags}>
+              {conditions.map((c) => (
+                <View
+                  key={c}
+                  style={[styles.tag, { backgroundColor: theme.cardElevated, borderColor: theme.border }]}
+                >
+                  <Text variant="labelSm" tone="secondary">
+                    {c}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            <Text variant="caption" tone="tertiary">
+              Shared by this donor. Hospital screening is always the final word.
+            </Text>
+          </Card>
+        ) : null}
+
+        {/* ── Contact actions ──
+            Recipients only, and only once the donor row exposes a phone (a
+            matched-thread context). Otherwise we say so plainly instead of
+            dangling dead buttons. */}
+        {showContact ? (
+          canCall ? (
+            <View style={{ gap: Spacing[3] }}>
+              <Text variant="overline" tone="muted" style={{ marginLeft: Spacing[1] }}>
+                Reach out
+              </Text>
+              <Button
+                label="Call"
+                icon="call"
+                variant="primary"
+                size="lg"
+                fullWidth
+                onPress={onCall}
+                accessibilityLabel={`Call ${donor.full_name}`}
+              />
+              {donor.whatsapp_available ? (
+                <Button
+                  label="WhatsApp"
+                  icon="logo-whatsapp"
+                  variant="success"
+                  size="md"
+                  fullWidth
+                  onPress={onWhatsApp}
+                  accessibilityLabel={`Message ${donor.full_name} on WhatsApp`}
+                />
+              ) : null}
+              <Button
+                label="Message"
+                icon="chatbubble-ellipses-outline"
+                variant="outline"
+                size="md"
+                fullWidth
+                onPress={onMessage}
+                accessibilityLabel={`Message ${donor.full_name} in the app`}
+              />
+            </View>
+          ) : (
+            <Card
+              variant="surface"
+              style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[3] }}
+            >
+              <View style={[styles.iconCircle, { backgroundColor: theme.cardElevated }]}>
+                <Ionicons name="lock-closed-outline" size={18} color={theme.textMuted} />
+              </View>
+              <Text variant="caption" tone="muted" style={{ flex: 1 }}>
+                Contact details unlock once this donor accepts your request. Post one or wait for them to
+                accept, then call and chat open here.
+              </Text>
+            </Card>
+          )
+        ) : null}
+      </ScrollView>
+    </View>
+  );
 }
-
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function SectionCard({ title, children, theme }: { title: string; children: React.ReactNode; theme: any }) {
-    return (
-        <View style={[styles.sectionCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>{title}</Text>
-            <View style={styles.sectionBody}>{children}</View>
-        </View>
-    );
-}
-
-function StatCell({ value, label, color, theme }: { value: string; label: string; color: string; theme: any }) {
-    return (
-        <View style={styles.statCell}>
-            <Text style={[styles.statValue, { color }]}>{value}</Text>
-            <Text style={[styles.statLabel, { color: theme.textMuted }]}>{label}</Text>
-        </View>
-    );
-}
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-    root: { flex: 1 },
+  root: { flex: 1 },
+  scroll: { padding: Spacing[5], gap: Spacing[4] },
+  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: Spacing[16] },
 
-    // Top bar
-    topBar: {
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        paddingHorizontal: Spacing[5], paddingBottom: Spacing[3],
-        borderBottomWidth: StyleSheet.hairlineWidth,
-    },
-    closeBtn: { width: 40, height: 40, justifyContent: 'center' },
-    closeIcon: { fontSize: FontSize.xl, fontWeight: FontWeight.bold },
-    topTitle: { fontSize: FontSize.base, fontWeight: FontWeight.black, letterSpacing: LetterSpacing.snug },
-    statusDotSmall: { width: 8, height: 8, borderRadius: 4 },
+  avatarWrap: { position: 'relative' },
+  avatarRing: {
+    width: 96,
+    height: 96,
+    borderRadius: Radius.pill,
+    borderCurve: 'continuous',
+    borderWidth: 2.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatar: { width: 96, height: 96 },
+  statusDot: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    width: 18,
+    height: 18,
+    borderRadius: Radius.pill,
+    borderWidth: 3,
+  },
 
-    scroll: { padding: Spacing[5], gap: Spacing[4] },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing[1], justifyContent: 'center' },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing[2] },
+  statusPip: { width: 7, height: 7, borderRadius: Radius.pill },
 
-    // Hero card
-    heroCard: {
-        borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth,
-        overflow: 'hidden', padding: Spacing[5], gap: Spacing[4],
-        alignItems: 'center',
-    },
-    avatarRow: { position: 'relative', alignSelf: 'center' },
-    avatarRing: { borderRadius: 999, borderWidth: 2.5, padding: 3 },
-    avatar: { width: 88, height: 88, borderRadius: 44 },
-    avatarFallback: { width: 88, height: 88, borderRadius: 44, alignItems: 'center', justifyContent: 'center' },
-    initials: { fontSize: FontSize.xl, fontWeight: FontWeight.black, letterSpacing: -1 },
-    avatarStatusDot: {
-        position: 'absolute', bottom: 5, right: 5,
-        width: 14, height: 14, borderRadius: 7, borderWidth: 2.5,
-    },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: Spacing[4],
+  },
+  statCell: { flex: 1, alignItems: 'center', gap: Spacing[1] },
+  statDivider: { width: StyleSheet.hairlineWidth, height: 32 },
 
-    heroMeta: { alignItems: 'center', gap: Spacing[1] },
-    nameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing[2], flexWrap: 'wrap', justifyContent: 'center' },
-    heroName: { fontSize: FontSize.lg, fontWeight: FontWeight.black, letterSpacing: LetterSpacing.tight },
-    verifiedBadge: { paddingHorizontal: Spacing[2], paddingVertical: 2, borderRadius: Radius.pill },
-    verifiedText: { fontSize: FontSize['2xs'], fontWeight: FontWeight.black, letterSpacing: LetterSpacing.wide },
-    availabilityText: { fontSize: FontSize.sm, fontWeight: FontWeight.bold, letterSpacing: LetterSpacing.snug },
-    addressText: { fontSize: FontSize.xs },
+  iconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: Radius.pill,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-    bloodBadge: { alignSelf: 'center' },
-
-    statsRow: {
-        flexDirection: 'row', alignItems: 'center',
-        borderTopWidth: StyleSheet.hairlineWidth, paddingTop: Spacing[4],
-        width: '100%',
-    },
-    statCell: { flex: 1, alignItems: 'center', gap: 3 },
-    statValue: { fontSize: FontSize.base, fontWeight: FontWeight.black },
-    statLabel: { fontSize: FontSize['2xs'], fontWeight: FontWeight.bold, letterSpacing: LetterSpacing.widest, textTransform: 'uppercase' },
-    statDivider: { width: StyleSheet.hairlineWidth, height: 28 },
-
-    // Compatibility banner
-    compatBanner: {
-        flexDirection: 'row', alignItems: 'flex-start', gap: Spacing[3],
-        padding: Spacing[3], borderRadius: Radius.xl, borderWidth: 1,
-    },
-    compatIcon: { fontSize: 18 },
-    compatText: { flex: 1, fontSize: FontSize.sm, lineHeight: 20 },
-
-    // ETA card
-    etaCard: { borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
-    etaInner: { flexDirection: 'row', alignItems: 'center', gap: Spacing[3], padding: Spacing[4] },
-    etaStat: { flex: 1, alignItems: 'center', gap: 2 },
-    etaValue: { fontSize: FontSize.base, fontWeight: FontWeight.black },
-    etaLabel: { fontSize: FontSize['2xs'], fontWeight: FontWeight.bold, letterSpacing: LetterSpacing.widest, textTransform: 'uppercase' },
-    etaDivider: { width: StyleSheet.hairlineWidth, height: 28 },
-    dirBtn: { paddingHorizontal: Spacing[3], paddingVertical: Spacing[2], borderRadius: Radius.pill },
-    dirBtnText: { color: '#fff', fontSize: FontSize.xs, fontWeight: FontWeight.black },
-
-    // Section card
-    sectionCard: { borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden', padding: Spacing[4] },
-    sectionLabel: { fontSize: FontSize['2xs'], fontWeight: FontWeight.black, letterSpacing: LetterSpacing.widest, textTransform: 'uppercase', marginBottom: Spacing[3] },
-    sectionBody: { gap: Spacing[2] },
-
-    // Medical tags
-    tags: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing[2] },
-    tag: { paddingHorizontal: Spacing[2], paddingVertical: Spacing[1], borderRadius: Radius.pill },
-    tagText: { fontSize: FontSize.xs },
-
-    // History rows
-    historyRow: {
-        flexDirection: 'row', alignItems: 'center', gap: Spacing[3],
-        padding: Spacing[3], borderRadius: Radius.xl, borderWidth: StyleSheet.hairlineWidth,
-    },
-    historyMeta: { flex: 1, gap: 2 },
-    historyHospital: { fontSize: FontSize.sm, fontWeight: FontWeight.black },
-    historyAddr: { fontSize: FontSize.xs },
-    historyTime: { fontSize: FontSize.xs },
-    historyRight: { alignItems: 'flex-end', gap: Spacing[1] },
-    urgencyPip: { width: 6, height: 6, borderRadius: 3 },
-    statusPill: {
-        paddingHorizontal: Spacing[2], paddingVertical: 2,
-        borderRadius: Radius.full, borderWidth: 1,
-    },
-    statusPillText: { fontSize: FontSize['2xs'], fontWeight: FontWeight.black, textTransform: 'uppercase', letterSpacing: LetterSpacing.wide },
-
-    // Member since
-    memberRow: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.xl, padding: Spacing[3], alignItems: 'center' },
-    memberText: { fontSize: FontSize.xs },
-
-    // Actions
-    actionWrap: { gap: Spacing[3] },
-    liveWaitPill: {
-        flexDirection: 'row', alignItems: 'center', gap: Spacing[2],
-        paddingHorizontal: Spacing[3], paddingVertical: Spacing[2],
-        borderRadius: Radius.pill, borderWidth: StyleSheet.hairlineWidth,
-    },
-    liveWaitDot: { width: 8, height: 8, borderRadius: 4 },
-    liveWaitText: { flex: 1, fontSize: FontSize.xs, fontWeight: FontWeight.semibold, letterSpacing: LetterSpacing.snug },
+  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing[2] },
+  tag: {
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing['1.5'],
+    borderRadius: Radius.pill,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+  },
 });
