@@ -74,7 +74,12 @@ export function ToastViewport() {
           ) : null}
         </View>
         {toast.action ? (
-          <Pressable onPress={() => { toast.action?.onPress(); dismiss(); }} hitSlop={8}>
+          <Pressable
+            onPress={() => { toast.action?.onPress(); dismiss(); }}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={toast.action.label}
+          >
             <Text variant="label" style={{ color: accent }}>{toast.action.label}</Text>
           </Pressable>
         ) : null}
