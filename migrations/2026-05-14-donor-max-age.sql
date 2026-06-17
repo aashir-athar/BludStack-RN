@@ -1,5 +1,5 @@
 -- ─────────────────────────────────────────────────────────────────────────────
--- Migration: 2026-05-14 — add maximum donor age (65)
+-- Migration: 2026-05-14 - add maximum donor age (65)
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Run once in Supabase Studio → SQL Editor. Idempotent and safe to re-run.
 --
@@ -8,7 +8,7 @@
 --   now:  donors must be 18-65 inclusive (WHO whole-blood guideline)
 --
 -- The mobile client + backend (authController, profileController) already
--- enforce the same window — this DB constraint is the final guard against
+-- enforce the same window - this DB constraint is the final guard against
 -- direct service_role writes that bypass the application layer.
 -- ─────────────────────────────────────────────────────────────────────────────
 
@@ -16,7 +16,7 @@ set search_path = public;
 
 -- Reject the migration up front if any existing donor row already violates
 -- the new ceiling. The operator must decide what to do with them (downgrade
--- to recipient, or grant an exception) before the constraint lands — silent
+-- to recipient, or grant an exception) before the constraint lands - silent
 -- corruption is worse than a noisy abort.
 do $$
 declare

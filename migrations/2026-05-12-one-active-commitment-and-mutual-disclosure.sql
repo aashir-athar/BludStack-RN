@@ -1,5 +1,5 @@
 -- ─────────────────────────────────────────────────────────────────────────────
--- Migration: 2026-05-12 — one-active-commitment rule + mutual contact disclosure
+-- Migration: 2026-05-12 - one-active-commitment rule + mutual contact disclosure
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Run this delta in Supabase Studio's SQL Editor. Idempotent and safe to re-run.
 --
@@ -10,13 +10,13 @@
 --   2) Adds a permissive SELECT policy on public.profiles that opens mutual
 --      visibility ONLY after an accepted/completed response exists between
 --      the two parties. Fixes "name / call / message missing on the request
---      detail screen" — the join was returning null because the prior policy
+--      detail screen" - the join was returning null because the prior policy
 --      only allowed users to see their own row.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 set search_path = public;
 
--- ── 1. accept_blood_request — one-active-commitment rule ─────────────────────
+-- ── 1. accept_blood_request - one-active-commitment rule ─────────────────────
 create or replace function public.accept_blood_request(
   p_request_id uuid,
   p_donor_id   uuid
@@ -93,7 +93,7 @@ begin
 
   if v_other_commitment is not null then
     return query select null::uuid, null::response_status_enum,
-      'You already committed to another active request — complete or cancel that one first';
+      'You already committed to another active request - complete or cancel that one first';
     return;
   end if;
 
@@ -122,7 +122,7 @@ end $$;
 revoke all     on function public.accept_blood_request(uuid, uuid) from public;
 grant  execute on function public.accept_blood_request(uuid, uuid) to service_role;
 
--- ── 2. profiles — mutual-commitment SELECT policy ────────────────────────────
+-- ── 2. profiles - mutual-commitment SELECT policy ────────────────────────────
 drop policy if exists "profiles_select_mutual_commitment" on public.profiles;
 create policy "profiles_select_mutual_commitment"
   on public.profiles for select

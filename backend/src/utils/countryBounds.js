@@ -2,12 +2,12 @@
 'use strict';
 
 /**
- * Country bounding boxes — single source of truth on the backend.
+ * Country bounding boxes - single source of truth on the backend.
  * Kept intentionally narrow so we never match a donor across an international
  * border (e.g. Pakistani Punjab vs Indian Punjab on either side of the line).
  *
  * If you add a country, mirror the entry in mobile/constants/BloodData.ts
- * (the mobile copy is informational only — actual matching happens server-side).
+ * (the mobile copy is informational only - actual matching happens server-side).
  */
 const COUNTRY_BOUNDS = Object.freeze({
   PK: { latMin: 23.5,  latMax: 37.1, lonMin: 60.8,   lonMax: 75.4,  name: 'Pakistan' },

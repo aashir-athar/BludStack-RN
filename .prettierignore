@@ -1,0 +1,16 @@
+# Dependencies and build output
+node_modules/
+mobile/node_modules/
+backend/node_modules/
+mobile/dist/
+mobile/.expo/
+mobile/android/
+mobile/ios/
+coverage/
+
+# Generated / vendored
+*.hbc
+package-lock.json
+
+# Lockstep with the existing config — formatting is additive, not a rewrite of
+# machine-generated files.

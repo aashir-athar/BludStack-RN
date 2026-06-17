@@ -11,8 +11,11 @@ android/
 # ── Environment / secrets ─────────────────────────────────────
 .env
 .env.local
-.env.example
+.env.*.local
 *.local
+# Keep the key-free templates tracked so contributors have a starting point.
+!.env.example
+!**/.env.example
 
 # ── Editor / OS ───────────────────────────────────────────────
 .DS_Store

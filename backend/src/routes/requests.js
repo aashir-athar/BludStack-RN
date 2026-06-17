@@ -18,7 +18,7 @@ const {
 const BLOOD_GROUPS = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
 const URGENCY      = ['critical','urgent','standard'];
 
-// GET  /api/v1/requests/my  — must be before /:id
+// GET  /api/v1/requests/my  - must be before /:id
 router.get('/my', requireAuth, getMyRequests);
 
 // GET  /api/v1/requests
@@ -53,15 +53,15 @@ router.post(
     body('units_needed')
       .optional()
       .isInt({ min: 1, max: 20 })
-      .withMessage('units_needed must be 1–20'),
+      .withMessage('units_needed must be 1-20'),
     body('hospital_name')
       .trim()
       .isLength({ min: 2, max: 200 })
-      .withMessage('hospital_name is required (2–200 chars)'),
+      .withMessage('hospital_name is required (2-200 chars)'),
     body('hospital_address')
       .trim()
       .isLength({ min: 5, max: 400 })
-      .withMessage('hospital_address is required (5–400 chars)'),
+      .withMessage('hospital_address is required (5-400 chars)'),
     body('latitude')
       .isFloat({ min: -90, max: 90 })
       .withMessage('latitude must be a valid coordinate'),

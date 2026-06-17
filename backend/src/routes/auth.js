@@ -24,7 +24,7 @@ router.post(
     body('full_name')
       .trim()
       .isLength({ min: 2, max: 80 })
-      .withMessage('full_name must be 2–80 characters'),
+      .withMessage('full_name must be 2-80 characters'),
     body('blood_group')
       .isIn(BLOOD_GROUPS)
       .withMessage(`blood_group must be one of: ${BLOOD_GROUPS.join(', ')}`),

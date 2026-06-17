@@ -1,6 +1,6 @@
 -- migrations/2026-05-12-uber-redesign.sql
 -- Run once in Supabase Studio → SQL Editor.
--- Idempotent — safe to re-run. Contains every schema delta from the
+-- Idempotent - safe to re-run. Contains every schema delta from the
 -- 2026 Uber-style redesign pass:
 --   • Live donor-location columns on request_responses
 --   • complete_blood_donation: ambiguous-column fix + N-donors-per-N-units rule
@@ -35,7 +35,7 @@ create index if not exists idx_request_responses_location
   where donor_lat is not null;
 
 -- ════════════════════════════════════════════════════════════════════════════
--- 2.  accept_blood_request RPC — table aliases on every reference
+-- 2.  accept_blood_request RPC - table aliases on every reference
 -- ════════════════════════════════════════════════════════════════════════════
 create or replace function public.accept_blood_request(
   p_request_id uuid,
@@ -120,7 +120,7 @@ begin
 end $$;
 
 -- ════════════════════════════════════════════════════════════════════════════
--- 3.  complete_blood_donation RPC — N-donors-per-N-units + alias-disambiguated
+-- 3.  complete_blood_donation RPC - N-donors-per-N-units + alias-disambiguated
 -- ════════════════════════════════════════════════════════════════════════════
 create or replace function public.complete_blood_donation(
   p_request_id uuid,
@@ -217,7 +217,7 @@ begin
 end $$;
 
 -- ════════════════════════════════════════════════════════════════════════════
--- 4.  Trigger guards — stronger service_role detection
+-- 4.  Trigger guards - stronger service_role detection
 -- ════════════════════════════════════════════════════════════════════════════
 create or replace function public.tg_guard_profile_privileged_writes()
 returns trigger

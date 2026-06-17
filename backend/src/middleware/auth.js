@@ -5,7 +5,7 @@ const { supabaseAdmin } = require('../utils/supabaseAdmin');
 const { error }         = require('../utils/response');
 
 /**
- * requireAuth — verifies the Bearer JWT from Supabase.
+ * requireAuth - verifies the Bearer JWT from Supabase.
  * Attaches req.user (Supabase User object) and req.userId.
  */
 async function requireAuth(req, res, next) {
@@ -35,7 +35,7 @@ async function requireAuth(req, res, next) {
 }
 
 /**
- * optionalAuth — same as requireAuth but does NOT reject unauthenticated requests.
+ * optionalAuth - same as requireAuth but does NOT reject unauthenticated requests.
  * Useful for public endpoints that behave differently when logged in.
  */
 async function optionalAuth(req, _res, next) {

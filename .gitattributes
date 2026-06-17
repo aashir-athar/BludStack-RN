@@ -1,0 +1,28 @@
+# Normalize line endings: store as LF in the repo, check out native on each OS.
+# This kills the "LF will be replaced by CRLF" churn while keeping Windows happy.
+* text=auto
+
+# Source and config are always LF.
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.js    text eol=lf
+*.jsx   text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.sql   text eol=lf
+*.sh    text eol=lf
+
+# Binary assets — never touch their bytes.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ttf   binary
+*.otf   binary
+*.woff  binary
+*.woff2 binary
+*.ico   binary
+*.hbc   binary

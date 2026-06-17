@@ -49,7 +49,7 @@ async function expireStaleRequests() {
 
 /**
  * Clean up stale / invalid push tokens (DeviceNotRegistered).
- * Supabase realtime notifies us of errors — here we batch-clean weekly.
+ * Supabase realtime notifies us of errors - here we batch-clean weekly.
  * In practice, tokens are cleaned when Expo returns DeviceNotRegistered.
  *
  * Runs every Sunday at 02:00.
@@ -57,7 +57,7 @@ async function expireStaleRequests() {
 async function cleanStalePushTokens() {
   try {
     console.log('[cron] cleanStalePushTokens: checking for stale tokens…');
-    // This is a placeholder — actual invalid token removal happens
+    // This is a placeholder - actual invalid token removal happens
     // in the notification service when Expo returns DeviceNotRegistered.
     // Here we could ping all tokens and remove ones that fail repeatedly.
     console.log('[cron] cleanStalePushTokens: done');
@@ -67,7 +67,7 @@ async function cleanStalePushTokens() {
 }
 
 /**
- * Health log — periodically log active geo-fencing jobs count.
+ * Health log - periodically log active geo-fencing jobs count.
  * Runs every 5 minutes.
  */
 async function logSystemHealth() {
@@ -81,24 +81,24 @@ async function logSystemHealth() {
 }
 
 function startCronJobs() {
-  // Expire stale requests — every 10 minutes
+  // Expire stale requests - every 10 minutes
   cron.schedule('*/10 * * * *', expireStaleRequests, {
     name: 'expire-stale-requests',
     timezone: 'UTC',
   });
 
-  // Clean stale push tokens — every Sunday at 02:00 UTC
+  // Clean stale push tokens - every Sunday at 02:00 UTC
   cron.schedule('0 2 * * 0', cleanStalePushTokens, {
     name: 'clean-push-tokens',
     timezone: 'UTC',
   });
 
-  // System health log — every 5 minutes
+  // System health log - every 5 minutes
   cron.schedule('*/5 * * * *', logSystemHealth, {
     name: 'health-log',
   });
 
-  console.log('⏰  Cron jobs started: [expire-stale-requests, clean-push-tokens, health-log]');
+  console.log('[cron] jobs started: [expire-stale-requests, clean-push-tokens, health-log]');
 }
 
 module.exports = { startCronJobs, expireStaleRequests };

@@ -1,15 +1,15 @@
 -- ════════════════════════════════════════════════════════════════════════════
--- BludStack — Supabase schema, RLS policies, indexes, triggers
+-- BludStack - Supabase schema, RLS policies, indexes, triggers
 -- ════════════════════════════════════════════════════════════════════════════
 -- This file is the SINGLE SOURCE OF TRUTH for the database.
 --
 -- How to apply:
 --   1. Open Supabase Studio → SQL Editor
---   2. Run this entire file (idempotent — safe to re-run after edits)
+--   2. Run this entire file (idempotent - safe to re-run after edits)
 --   3. Verify under Database → Policies that RLS is ENABLED on every table
 --
 -- Security model:
---   • RLS is ENABLED on every public table — NO row is readable without a policy
+--   • RLS is ENABLED on every public table - NO row is readable without a policy
 --   • The mobile client uses the anon key + a Supabase JWT (Bearer token)
 --   • The backend uses the service_role key which BYPASSES RLS
 --   • Therefore: sensitive ops (push_token, total_donations, role, etc.)
@@ -128,7 +128,7 @@ create table if not exists public.blood_requests (
 );
 
 -- ────────────────────────────────────────────────────────────────────────────
--- 4b. messages — in-app chat between donor and recipient about a request
+-- 4b. messages - in-app chat between donor and recipient about a request
 -- ────────────────────────────────────────────────────────────────────────────
 create table if not exists public.messages (
   id          uuid primary key default gen_random_uuid(),
@@ -138,7 +138,7 @@ create table if not exists public.messages (
   content     text not null,
   read        boolean not null default false,
   -- Client-generated idempotency key for offline outbox + optimistic UI reconciliation.
-  -- Allows resending without dupes — the unique index rejects retries.
+  -- Allows resending without dupes - the unique index rejects retries.
   client_id   uuid unique,
   created_at  timestamptz not null default now(),
 
@@ -266,7 +266,7 @@ create trigger blood_requests_fulfilled_at
   for each row execute function public.tg_set_fulfilled_at();
 
 -- ────────────────────────────────────────────────────────────────────────────
--- 7. RPCs — atomic, race-free operations the backend calls
+-- 7. RPCs - atomic, race-free operations the backend calls
 -- ────────────────────────────────────────────────────────────────────────────
 
 -- Atomic accept: claims a donor slot only if units_needed not yet reached.
@@ -292,9 +292,11 @@ declare
   v_existing          response_status_enum;
   v_resp_id           uuid;
   v_other_commitment  uuid;
+  v_last_donation     timestamptz;
+  v_available         boolean;
 begin
   -- Lock the request row for the duration of this transaction.
-  -- Every column reference is alias-qualified — without that, PG treats
+  -- Every column reference is alias-qualified - without that, PG treats
   -- "status" as ambiguous between the table column and the RETURNS TABLE
   -- output column with the same name (error 42702).
   select br.status, br.recipient_id, br.units_needed
@@ -339,22 +341,50 @@ begin
   end if;
 
   -- ────────────────────────────────────────────────────────────────────────
+  -- DONOR ELIGIBILITY (availability + 90-day cooldown) - race-free
+  -- ────────────────────────────────────────────────────────────────────────
+  -- Lock the donor's profile row AND read the eligibility fields in the same
+  -- lock. The lock also serialises concurrent accepts on DIFFERENT requests for
+  -- the SAME donor (without it, each call would lock only its own
+  -- blood_requests row and both could pass the one-commitment check at once).
+  -- Enforcing availability + cooldown here makes them authoritative inside the
+  -- transaction instead of a racy app-layer pre-check.
+  select p.last_donation_date, p.is_available_to_donate
+    into v_last_donation, v_available
+    from public.profiles p
+   where p.id = p_donor_id
+   for update;
+
+  if not found then
+    return query select null::uuid, null::response_status_enum, 'Donor profile not found';
+    return;
+  end if;
+
+  if v_available is distinct from true then
+    return query select null::uuid, null::response_status_enum,
+      'You are currently marked as unavailable to donate';
+    return;
+  end if;
+
+  if v_last_donation is not null
+     and v_last_donation > now() - interval '90 days' then
+    return query select null::uuid, null::response_status_enum,
+      format(
+        'You must wait %s more day(s) before donating again',
+        ceil(extract(epoch from (v_last_donation + interval '90 days' - now())) / 86400.0)::int
+      );
+    return;
+  end if;
+
+  -- ────────────────────────────────────────────────────────────────────────
   -- ONE-ACTIVE-COMMITMENT RULE
   -- ────────────────────────────────────────────────────────────────────────
-  -- A donor can only have ONE outstanding `accepted` response at a time —
-  -- i.e. they cannot commit to a second request while a prior commitment is
-  -- still in flight on an `active` blood_request. The block clears when:
-  --   (a) the prior response is marked `completed` (donation recorded), or
-  --   (b) the prior request flips to `fulfilled`, `cancelled`, or `expired`.
-  -- Checked here (server-side), authoritative regardless of client state.
-  --
-  -- Race serialisation: lock the donor's profile row. Without this lock, two
-  -- concurrent accepts on DIFFERENT requests for the SAME donor would each
-  -- only lock their own blood_requests row and both could pass the check at
-  -- the same time. Locking the profile row forces those concurrent calls to
-  -- serialise on the donor.
-  perform 1 from public.profiles where id = p_donor_id for update;
-
+  -- A donor can only have ONE outstanding `accepted` response at a time - they
+  -- cannot commit to a second request while a prior commitment is still in
+  -- flight on an `active` blood_request. The block clears when (a) the prior
+  -- response is marked `completed`, or (b) the prior request flips to
+  -- `fulfilled`, `cancelled`, or `expired`. Serialised by the profile-row lock
+  -- taken just above.
   select rr.request_id
     into v_other_commitment
     from public.request_responses rr
@@ -367,7 +397,7 @@ begin
 
   if v_other_commitment is not null then
     return query select null::uuid, null::response_status_enum,
-      'You already committed to another active request — complete or cancel that one first';
+      'You already committed to another active request - complete or cancel that one first';
     return;
   end if;
 
@@ -394,7 +424,7 @@ begin
   return query select v_resp_id, 'accepted'::response_status_enum, 'OK';
 end $$;
 
--- Atomic complete: marks fulfilled, bumps donor stats, flips response — all in one transaction.
+-- Atomic complete: marks fulfilled, bumps donor stats, flips response - all in one transaction.
 create or replace function public.complete_blood_donation(
   p_request_id uuid,
   p_donor_id   uuid,
@@ -498,7 +528,7 @@ begin
 end $$;
 
 -- ────────────────────────────────────────────────────────────────────────────
--- 8. Row Level Security — ENABLE everywhere
+-- 8. Row Level Security - ENABLE everywhere
 -- ────────────────────────────────────────────────────────────────────────────
 alter table public.profiles          enable row level security;
 alter table public.blood_requests    enable row level security;
@@ -509,7 +539,7 @@ alter table public.messages          enable row level security;
 -- Postgres checks table-level GRANTs BEFORE RLS policies. If these are
 -- missing, the user gets "permission denied for table X" even with a correct
 -- RLS policy. Supabase's default grants can be revoked accidentally or
--- changed across project ages — these explicit grants make the schema
+-- changed across project ages - these explicit grants make the schema
 -- self-contained.
 grant usage on schema public to anon, authenticated, service_role;
 
@@ -544,7 +574,7 @@ begin
 end $$;
 
 -- ────────────────────────────────────────────────────────────────────────────
--- 9. RLS Policies — profiles
+-- 9. RLS Policies - profiles
 -- ────────────────────────────────────────────────────────────────────────────
 -- The mobile client uses anon key + JWT. auth.uid() returns the user's id.
 -- Public columns are exposed via a VIEW (see section 10); the base table itself
@@ -599,7 +629,7 @@ create policy "profiles_update_own"
   using (auth.uid() = id)
   with check (auth.uid() = id);
 
--- No DELETE policy — profiles are never client-deletable. Account deletion
+-- No DELETE policy - profiles are never client-deletable. Account deletion
 -- happens via Supabase admin API which cascades from auth.users.
 
 -- ── Trigger: prevent client from writing privileged columns ──────────────
@@ -613,7 +643,7 @@ declare
   v_is_service_role boolean;
 begin
   -- Service role bypasses this entirely
-  -- Multiple detection methods OR-ed — empirically a single check
+  -- Multiple detection methods OR-ed - empirically a single check
   -- (current_setting on the JWT claim) returns NULL in some PostgREST
   -- configurations even for service_role connections.
   v_is_service_role :=
@@ -651,7 +681,7 @@ create trigger profiles_guard_privileged
   for each row execute function public.tg_guard_profile_privileged_writes();
 
 -- ────────────────────────────────────────────────────────────────────────────
--- 10. public_profiles VIEW — sanitized public listing
+-- 10. public_profiles VIEW - sanitized public listing
 -- ────────────────────────────────────────────────────────────────────────────
 -- Used by mobile when it needs to display *other* users (e.g. leaderboard).
 -- Strips PII: phone, email, push_token, exact lat/lon, address, last_donation_date.
@@ -677,7 +707,7 @@ from public.profiles;
 grant select on public.public_profiles to anon, authenticated;
 
 -- ────────────────────────────────────────────────────────────────────────────
--- 11. RLS Policies — blood_requests
+-- 11. RLS Policies - blood_requests
 -- ────────────────────────────────────────────────────────────────────────────
 
 -- READ: any authenticated user can see ACTIVE requests (needed for the donor
@@ -710,7 +740,7 @@ as $$
 declare
   v_is_service_role boolean;
 begin
-  -- Multiple detection methods OR-ed — empirically a single check
+  -- Multiple detection methods OR-ed - empirically a single check
   -- (current_setting on the JWT claim) returns NULL in some PostgREST
   -- configurations even for service_role connections.
   v_is_service_role :=
@@ -747,7 +777,7 @@ create trigger blood_requests_guard
   for each row execute function public.tg_guard_request_updates();
 
 -- ────────────────────────────────────────────────────────────────────────────
--- 12. RLS Policies — request_responses
+-- 12. RLS Policies - request_responses
 -- ────────────────────────────────────────────────────────────────────────────
 
 -- READ: donor can see their own responses; recipient can see all responses to their requests.
@@ -767,7 +797,7 @@ create policy "request_responses_select_visible"
 -- (No client policies = denied.)
 
 -- ────────────────────────────────────────────────────────────────────────────
--- 12b. RLS Policies — messages
+-- 12b. RLS Policies - messages
 -- ────────────────────────────────────────────────────────────────────────────
 -- A message is visible to its sender or its receiver. Inserts are allowed only
 -- from the sender (auth.uid() = sender_id) and only when there is a matching
@@ -892,7 +922,7 @@ alter function public.accept_blood_request    (uuid, uuid)       owner to servic
 alter function public.complete_blood_donation (uuid, uuid, uuid) owner to service_role;
 
 -- ════════════════════════════════════════════════════════════════════════════
--- DONE — RLS is now enforced. The mobile client can no longer:
+-- DONE - RLS is now enforced. The mobile client can no longer:
 --   ✗ Read other users' push tokens, GPS, or last_donation_date
 --   ✗ Insert blood_requests directly (must go through backend)
 --   ✗ Insert/update request_responses directly (must go through backend)
