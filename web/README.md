@@ -1,36 +1,79 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# BludStack Web
 
-## Getting Started
+The web companion to the BludStack mobile app - the same blood-donation network,
+the same backend, the same design language, in the browser. It is a fully
+client-rendered SPA: email OTP sign-in, onboarding, the request feed, posting a
+request on a map, accepting and completing donations, a live tracking map,
+realtime chat, donor profiles, and the reputation program.
 
-First, run the development server:
+## Stack
+
+- Next.js 16 (App Router, React 19) - static export, no server runtime
+- Tailwind CSS v4 with the app's exact palette (crimson / onyx / bone)
+- TanStack Query + react-hook-form + zod (ported from the app)
+- Supabase JS (auth, realtime) + the shared Express backend over fetch
+- MapLibre GL JS over free OpenStreetMap / CARTO tiles (no Google Maps, no key)
+- lucide-react icons and the real blood-drop logo (no emojis anywhere)
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm ci
+cp .env.example .env.local
+# Fill in the same Supabase project + backend the mobile app uses:
+#   NEXT_PUBLIC_API_URL, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Develop
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run dev      # http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+If you ever see a Turbopack "React Client Manifest" error, it is a stale build
+cache: stop the dev server, `rm -rf .next`, and start it again.
 
-## Learn More
+## Build
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run build    # static export to ./out
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The whole app prerenders to static HTML. There are no dynamic server routes: the
+detail screens use query params (`/request?id=...`, `/donor?id=...`,
+`/map?id=...&role=...`, `/chat?id=...&with=...`) so a static host can serve any id.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Deploy to GitHub Pages
 
-## Deploy on Vercel
+A workflow is included at `.github/workflows/deploy-web-pages.yml`.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. In the repo: Settings -> Pages -> Source = "GitHub Actions".
+2. Settings -> Secrets and variables -> Actions, add:
+   `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+3. Push to `master` (or run the workflow manually). It builds `web/` and publishes
+   `out/` to Pages.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The workflow sets `NEXT_PUBLIC_BASE_PATH=/BludStack` because GitHub project pages
+serve under `https://<user>.github.io/<repo>`. For a custom domain or a
+`<user>.github.io` repo, set that to an empty string.
+
+## Structure
+
+```
+web/
+├── app/
+│   ├── page.tsx              # marketing landing
+│   ├── signin/ onboarding/   # auth + profile setup
+│   ├── (app)/                # the authed app (guarded, responsive shell)
+│   │   ├── feed/ post/ donors/ my-requests/ history/ profile/ profile/edit/
+│   │   ├── request/ donor/   # detail screens (read id from query string)
+│   │   ├── map/ chat/        # live tracking + realtime chat
+│   │   ├── layout.tsx        # auth guard + top nav + mobile bottom tabs
+│   │   └── loading.tsx       # skeleton route loading
+│   ├── global-error.tsx not-found.tsx  # branded error states
+│   └── globals.css           # design tokens (ported from the app palette)
+├── components/               # brand, nav, footer, UI kit, map, cards
+├── lib/                      # supabase, api, schemas, blood-data, geo, age,
+│                             # reputation, auth, toast, queries (ported)
+└── public/logo.png           # the real blood-drop logo
+```

@@ -209,7 +209,11 @@ BludStack/
 │   │   └── server.js
 │   ├── __tests__/              # Jest: geo units + supertest boot smoke
 │   └── vercel.json             # Function + cron config
-├── .github/workflows/          # mobile-ci · backend-ci · schema-check · eas-build
+├── web/                        # Next.js 16 web companion (full app, static export)
+│   ├── app/                    # landing + signin/onboarding + (app) screens
+│   ├── components/ lib/        # UI kit + ported logic (api, schemas, queries)
+│   └── README.md               # web setup + GitHub Pages deployment
+├── .github/workflows/          # mobile-ci · backend-ci · schema-check · eas-build · deploy-web-pages
 ├── supabase_schema.sql         # Single source of truth - tables, RLS, RPCs, grants
 ├── migrations/                 # Delta files for non-destructive Studio runs
 ├── verify_schema.sql           # Single-row PASS/FAIL diagnostic
