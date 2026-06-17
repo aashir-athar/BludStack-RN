@@ -1,7 +1,7 @@
 "use client";
 
-import { use } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, ShieldCheck, CheckCircle2, XCircle } from "lucide-react";
 import { useProfileById } from "@/lib/queries";
 import { useAuth } from "@/lib/auth";
@@ -9,8 +9,8 @@ import { DONOR_FOR_RECIPIENT, type BloodGroup } from "@/lib/blood-data";
 import { ReputationBadge } from "@/components/reputation-badge";
 import { Card, BloodGroupBadge, Skeleton, EmptyState, LinkButton } from "@/components/ui";
 
-export default function DonorDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+function DonorContent() {
+  const id = useSearchParams().get("id") ?? "";
   const router = useRouter();
   const { profile: me, isRecipient } = useAuth();
   const { data: donor, isLoading } = useProfileById(id);
@@ -81,5 +81,13 @@ export default function DonorDetailPage({ params }: { params: Promise<{ id: stri
         </p>
       </Card>
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<div className="flex flex-col gap-4"><div className="h-40 w-full animate-pulse rounded-2xl bg-white/5" /></div>}>
+      <DonorContent />
+    </Suspense>
   );
 }

@@ -2,8 +2,8 @@
 
 // Lever: reciprocity + loss aversion. A donor sees a real person who needs them
 // now; an owner sees exactly who has stepped up.
-import { use } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { MapPin, Droplet, ArrowLeft, Navigation, MessageSquare } from "lucide-react";
 import { useRequest, useAcceptRequest, useDeclineRequest, useCancelRequest } from "@/lib/queries";
 import { useAuth } from "@/lib/auth";
@@ -11,8 +11,8 @@ import { useToast } from "@/lib/toast";
 import { URGENCY_CONFIG, DONOR_FOR_RECIPIENT, type BloodGroup } from "@/lib/blood-data";
 import { Button, Card, Badge, Skeleton, EmptyState, BloodGroupBadge, LinkButton } from "@/components/ui";
 
-export default function RequestDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+function RequestContent() {
+  const id = useSearchParams().get("id") ?? "";
   const router = useRouter();
   const toast = useToast();
   const { user, profile } = useAuth();
@@ -51,7 +51,7 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
     try {
       await accept.mutateAsync(request.id);
       toast.success("You accepted", { description: "Share your live location so they can see you coming." });
-      router.push(`/map/${request.id}?role=donor`);
+      router.push(`/map?id=${request.id}&role=donor`);
     } catch (e) {
       toast.error("Could not accept", { description: e instanceof Error ? e.message : "Try again." });
     }
@@ -114,7 +114,7 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
         </Card>
       ) : isOwner ? (
         <div className="flex flex-col gap-3">
-          <LinkButton href={`/map/${request.id}?role=recipient`} fullWidth>
+          <LinkButton href={`/map?id=${request.id}&role=recipient`} fullWidth>
             <Navigation size={18} /> Track donors live
           </LinkButton>
           <Button variant="danger" fullWidth onClick={onCancel} loading={cancel.isPending}>
@@ -133,7 +133,7 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
             Not this time
           </Button>
           <LinkButton
-            href={`/chat/${request.id}?with=${request.recipient_id}`}
+            href={`/chat?id=${request.id}&with=${request.recipient_id}`}
             variant="secondary"
             fullWidth
           >
@@ -149,5 +149,13 @@ export default function RequestDetailPage({ params }: { params: Promise<{ id: st
         </Card>
       )}
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<div className="flex flex-col gap-4"><div className="h-40 w-full animate-pulse rounded-2xl bg-white/5" /></div>}>
+      <RequestContent />
+    </Suspense>
   );
 }

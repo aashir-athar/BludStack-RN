@@ -2,7 +2,7 @@
 
 // Lever: goal gradient. A shrinking distance and a moving dot make the help feel
 // imminent. Donor shares live GPS; recipient watches each accepted donor move.
-import { use, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams, useRouter } from "next/navigation";
 import { ArrowLeft, Navigation } from "lucide-react";
@@ -28,11 +28,12 @@ interface DonorPin {
   longitude: number;
 }
 
-export default function LiveMapPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+function MapContent() {
+  const searchParams = useSearchParams();
+  const id = searchParams.get("id") ?? "";
   const router = useRouter();
   const toast = useToast();
-  const role = useSearchParams().get("role") === "donor" ? "donor" : "recipient";
+  const role = searchParams.get("role") === "donor" ? "donor" : "recipient";
   const isDonor = role === "donor";
 
   const [hospital, setHospital] = useState<{ latitude: number; longitude: number; name: string } | null>(null);
@@ -156,5 +157,13 @@ export default function LiveMapPage({ params }: { params: Promise<{ id: string }
         ) : null}
       </Card>
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<div className="flex flex-col gap-4"><div className="h-40 w-full animate-pulse rounded-2xl bg-white/5" /></div>}>
+      <MapContent />
+    </Suspense>
   );
 }

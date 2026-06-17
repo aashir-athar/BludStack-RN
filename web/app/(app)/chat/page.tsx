@@ -2,7 +2,7 @@
 
 // Lever: reciprocity + commitment. Chat unlocks after a match, so the thread is
 // proof the two are in this together. Supabase Realtime, optimistic send.
-import { use, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Send } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -25,10 +25,11 @@ function clock(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export default function ChatPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id: requestId } = use(params);
+function ChatContent() {
+  const searchParams = useSearchParams();
+  const requestId = searchParams.get("id") ?? "";
   const router = useRouter();
-  const otherId = useSearchParams().get("with") ?? "";
+  const otherId = searchParams.get("with") ?? "";
   const { user } = useAuth();
   const myId = user?.id;
 
@@ -181,5 +182,13 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         </button>
       </form>
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<div className="flex flex-col gap-4"><div className="h-40 w-full animate-pulse rounded-2xl bg-white/5" /></div>}>
+      <ChatContent />
+    </Suspense>
   );
 }

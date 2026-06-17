@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { MapPin, Bell, ShieldCheck } from "lucide-react";
 import { BrandMark } from "./brand-mark";
 
@@ -99,12 +100,12 @@ export function Hero() {
             id="get-app"
             className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center"
           >
-            <a
+            <Link
               href="/signin"
               className="inline-flex items-center justify-center rounded-full bg-crimson-600 px-7 py-4 text-base font-semibold text-white shadow-xl shadow-crimson-600/25 transition-transform hover:bg-crimson-500 active:scale-[0.98]"
             >
               Get the app
-            </a>
+            </Link>
             <a
               href="#how"
               className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/5 px-7 py-4 text-base font-semibold text-bone-50 transition-colors hover:bg-white/10"

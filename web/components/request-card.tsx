@@ -19,7 +19,7 @@ export function RequestCard({ request }: { request: BloodRequest }) {
   const urgency = URGENCY_CONFIG[request.urgency];
   return (
     <Link
-      href={`/request/${request.id}`}
+      href={`/request?id=${request.id}`}
       className="block rounded-3xl border border-white/8 bg-surface p-5 transition-colors hover:border-crimson-500/30"
     >
       <div className="flex items-start gap-4">

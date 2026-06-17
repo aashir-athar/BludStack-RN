@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   Radio,
   HeartHandshake,
@@ -272,12 +273,12 @@ function CallToAction() {
           the next request could be one you answer.
         </p>
         <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
-          <a
+          <Link
             href="/signin"
             className="inline-flex w-full items-center justify-center rounded-full bg-crimson-600 px-8 py-4 text-base font-semibold text-white shadow-xl shadow-crimson-600/25 transition-transform hover:bg-crimson-500 active:scale-[0.98] sm:w-auto"
           >
             Get the app
-          </a>
+          </Link>
           <a
             href="https://github.com/aashir-athar/BludStack"
             className="inline-flex w-full items-center justify-center rounded-full border border-white/12 bg-white/5 px-8 py-4 text-base font-semibold text-bone-50 transition-colors hover:bg-white/10 sm:w-auto"

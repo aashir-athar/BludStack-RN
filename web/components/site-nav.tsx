@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Menu, X } from "lucide-react";
 import { Wordmark } from "./brand-mark";
 
@@ -34,12 +35,12 @@ export function SiteNav() {
         </div>
 
         <div className="flex items-center gap-2">
-          <a
+          <Link
             href="/signin"
             className="hidden rounded-full bg-crimson-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-crimson-600/20 transition-transform hover:bg-crimson-500 active:scale-[0.97] sm:inline-flex"
           >
             Get the app
-          </a>
+          </Link>
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
@@ -65,13 +66,13 @@ export function SiteNav() {
                 {l.label}
               </a>
             ))}
-            <a
+            <Link
               href="/signin"
               onClick={() => setOpen(false)}
               className="mt-2 inline-flex items-center justify-center rounded-full bg-crimson-600 px-5 py-3.5 text-base font-semibold text-white active:scale-[0.98]"
             >
               Get the app
-            </a>
+            </Link>
           </div>
         </div>
       ) : null}

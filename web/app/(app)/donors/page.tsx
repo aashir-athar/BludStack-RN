@@ -41,7 +41,7 @@ export default function DonorsPage() {
           {donors.map((d) => (
             <Link
               key={d.id}
-              href={`/donor/${d.id}`}
+              href={`/donor?id=${d.id}`}
               className="block rounded-3xl border border-white/8 bg-surface p-5 transition-colors hover:border-crimson-500/30"
             >
               <div className="flex items-center gap-4">
