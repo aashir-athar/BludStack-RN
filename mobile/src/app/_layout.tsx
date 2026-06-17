@@ -15,13 +15,8 @@ import { queryClient } from '@/queries/client';
 import { useRealtimeBridge } from '@/queries/realtime';
 import { useAppTheme, useIsDark } from '@/stores/themeStore';
 import { initAuth, useAuth } from '@/stores/authStore';
+import { useNotifications } from '@/hooks/useNotifications';
 import { LoadingScreen, ErrorBoundary, NetBanner, ToastViewport } from '@/ui';
-
-// Old context providers are kept wrapped while screens migrate to the stores;
-// they are removed once every screen reads from the new Zustand stores.
-import { ThemeProvider } from '@/contexts/ThemeContext';
-import { AuthProvider } from '@/contexts/AuthContext';
-import { ToastProvider } from '@/contexts/ToastContext';
 
 // KeyboardProvider is a native module (not in Expo Go). Lazy require + a named
 // pass-through fallback so the app boots in Expo Go and in a dev/prod build.
@@ -96,6 +91,7 @@ function RootNavigator() {
   const didInitialRedirect = useRef(false);
 
   useRealtimeBridge();
+  useNotifications(); // self-registers the push token once a user is present
 
   const navReady = !loading && !!session && !!profile?.full_name;
   useNotificationDeepLinks(navReady);
@@ -187,13 +183,7 @@ export default function RootLayout() {
           <SafeAreaProvider>
             <QueryClientProvider client={queryClient}>
               <TamaguiThemeBridge>
-                <ThemeProvider>
-                  <AuthProvider>
-                    <ToastProvider>
-                      <RootNavigator />
-                    </ToastProvider>
-                  </AuthProvider>
-                </ThemeProvider>
+                <RootNavigator />
               </TamaguiThemeBridge>
             </QueryClientProvider>
           </SafeAreaProvider>

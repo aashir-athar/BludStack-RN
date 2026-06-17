@@ -1,21 +1,24 @@
 // hooks/useNotifications.ts
 // ─────────────────────────────────────────────────────────────────────────────
 // After RLS, mobile cannot UPDATE its own profiles.push_token directly — that
-// column is server-managed. Tokens are registered via PUT /notifications/token.
-// (Fixes flaw #1 / #2 — the mobile no longer ever needs to read or write any
-// user's push_token directly against Supabase.)
+// column is server-managed. Tokens are registered via PUT /notifications/token,
+// so the app never reads or writes any user's push_token against Supabase.
+//
+// Registration is best-effort and silent: a denied permission or an Expo-Go run
+// without an EAS projectId simply skips, never surfacing noise to the user.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useCallback, useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/stores/authStore';
 import { apiRegisterPushToken } from '@/utils/api';
+import { errorReporter } from '@/lib/errorReporter';
 
 // Foreground handler — show the banner + play sound even when the app is open,
 // so a donor reading the feed still sees an incoming critical request.
-// `shouldShowBanner` / `shouldShowList` are the SDK 54 split of the legacy
+// `shouldShowBanner` / `shouldShowList` are the SDK 54+ split of the legacy
 // `shouldShowAlert`.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -27,10 +30,9 @@ Notifications.setNotificationHandler({
 });
 
 function getProjectId(): string | undefined {
-  return (
-    Constants.expoConfig?.extra?.eas?.projectId ??
-    (Constants as any).easConfig?.projectId
-  );
+  const easExtra = Constants.expoConfig?.extra?.eas as { projectId?: string } | undefined;
+  const easConfig = (Constants as { easConfig?: { projectId?: string } }).easConfig;
+  return easExtra?.projectId ?? easConfig?.projectId;
 }
 
 export function useNotifications() {
@@ -39,23 +41,19 @@ export function useNotifications() {
   const registerToken = useCallback(async () => {
     if (!user?.id) return;
     try {
-      // 1. Request permission
+      // 1. Permission
       const { status: existing } = await Notifications.getPermissionsAsync();
       let finalStatus = existing;
       if (existing !== 'granted') {
         const { status } = await Notifications.requestPermissionsAsync();
         finalStatus = status;
       }
-      if (finalStatus !== 'granted') {
-        console.log('[notifications] Permission denied — skipping token registration');
-        return;
-      }
+      if (finalStatus !== 'granted') return;
 
-      // 2. Android channels.
-      // `emergency` MUST be MAX importance so it bypasses Do Not Disturb on
-      // Android 8+. `default` is HIGH (heads-up, but respects DND).
-      // bypassDnd=true on emergency lets the channel ring even in silent mode —
-      // matches the iOS time-sensitive escalation we send from the backend.
+      // 2. Android channels. `emergency` MUST be MAX importance with bypassDnd so
+      // a life-critical alert rings even in silent mode / Do Not Disturb —
+      // matching the iOS time-sensitive escalation the backend sends. `default`
+      // is HIGH (heads-up, respects DND).
       if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('default', {
           name: 'BludStack Updates',
@@ -80,7 +78,7 @@ export function useNotifications() {
         });
       }
 
-      // 3. Get push token (Expo Go without EAS projectId will fail — expected)
+      // 3. Push token (Expo Go without an EAS projectId fails — expected, skip).
       const projectId = getProjectId();
       let pushToken: string;
       try {
@@ -89,27 +87,27 @@ export function useNotifications() {
         );
         pushToken = tokenData.data;
       } catch {
-        console.warn(
-          '[notifications] Push token unavailable — normal in Expo Go.\n' +
-          'Fix: `eas init` then add the projectId to app.json > extra.eas.projectId',
-        );
+        // Normal in Expo Go: run `eas init`, then add extra.eas.projectId to app.json.
         return;
       }
 
-      // 4. Register with backend (RLS blocks direct profiles.push_token writes)
+      // 4. Register with backend (RLS blocks direct profiles.push_token writes).
       try {
         await apiRegisterPushToken(pushToken);
-        console.log('[notifications] Push token registered');
-      } catch (e: any) {
-        console.warn('[notifications] Backend rejected token:', e?.message);
+      } catch (e) {
+        errorReporter.warn('Push token rejected by backend', {
+          message: e instanceof Error ? e.message : String(e),
+        });
       }
-    } catch (e: any) {
-      console.warn('[notifications] Unexpected error:', e?.message ?? e);
+    } catch (e) {
+      errorReporter.warn('Push registration failed', {
+        message: e instanceof Error ? e.message : String(e),
+      });
     }
-  }, [user]);
+  }, [user?.id]);
 
   useEffect(() => {
-    registerToken();
+    void registerToken();
   }, [registerToken]);
 
   const scheduleLocalNotification = useCallback(async (
@@ -121,13 +119,12 @@ export function useNotifications() {
     try {
       await Notifications.scheduleNotificationAsync({
         content: { title, body, data: data ?? {}, sound: 'default' },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-          seconds,
-        },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds },
       });
-    } catch (e: any) {
-      console.warn('[notifications] scheduleLocalNotification error:', e?.message);
+    } catch (e) {
+      errorReporter.warn('scheduleLocalNotification failed', {
+        message: e instanceof Error ? e.message : String(e),
+      });
     }
   }, []);
 

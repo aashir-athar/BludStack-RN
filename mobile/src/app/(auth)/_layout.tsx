@@ -1,9 +1,9 @@
 // app/(auth)/_layout.tsx
 import { Stack } from 'expo-router';
-import { useTheme } from '@/contexts/ThemeContext';
+import { useAppTheme } from '@/stores/themeStore';
 
 export default function AuthLayout() {
-  const { theme } = useTheme();
+  const theme = useAppTheme();
   return (
     <Stack
       screenOptions={{

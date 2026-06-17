@@ -33,7 +33,7 @@ export function filterDonorsByRadius<T extends { latitude: number; longitude: nu
   lat: number,
   lon: number,
   radiusKm: number,
-): Array<T & { distanceKm: number }> {
+): (T & { distanceKm: number })[] {
   return donors
     .map(d => ({ ...d, distanceKm: haversineDistance(lat, lon, d.latitude, d.longitude) }))
     .filter(d => d.distanceKm <= radiusKm)
