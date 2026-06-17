@@ -8,6 +8,7 @@ export { PressableScale, type PressableScaleProps } from './PressableScale';
 export { BrandMark, type BrandMarkProps, type BrandMarkVariant } from './BrandMark';
 export { Input, type InputProps, type InputVariant } from './Input';
 export { BloodGroupBadge, type BloodGroupBadgeProps } from './BloodGroupBadge';
+export { ReputationBadge, type ReputationBadgeProps, type ReputationBadgeSize } from './ReputationBadge';
 export { EmptyState, type EmptyStateProps } from './EmptyState';
 export { ScreenHeader, type ScreenHeaderProps } from './ScreenHeader';
 export { ToastViewport } from './Toast';

@@ -13,8 +13,9 @@ import { useAuth, useIsDonor } from '@/stores/authStore';
 import { useToast } from '@/stores/toastStore';
 import { computeAge, DONOR_MIN_AGE, DONOR_MAX_AGE } from '@/utils/age';
 import { MIN_DONATION_GAP_DAYS } from '@/constants/BloodData';
-import { Spacing, Radius, FontWeight } from '@/constants/Typography';
-import { Text, Card, BloodGroupBadge, Button } from '@/ui';
+import { Spacing, Radius } from '@/constants/Typography';
+import { reputationProgress, livesHelped } from '@/lib/reputation';
+import { Text, Card, BloodGroupBadge, ReputationBadge, Button } from '@/ui';
 
 const APPEARANCE: { label: string; value: ThemeMode; icon: keyof typeof Ionicons.glyphMap }[] = [
   { label: 'Dark', value: 'dark', icon: 'moon' },
@@ -68,6 +69,8 @@ export default function ProfileScreen() {
   const cooldownDays = remainingCooldown(profile.last_donation_date);
   const ageOk = age !== null && age >= DONOR_MIN_AGE && age <= DONOR_MAX_AGE;
   const available = profile.is_available_to_donate && cooldownDays === 0 && ageOk;
+  const donations = profile.total_donations ?? 0;
+  const rep = reputationProgress(donations);
 
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
@@ -89,8 +92,9 @@ export default function ProfileScreen() {
               <Text variant="title">{profile.full_name}</Text>
               {profile.is_verified ? <Ionicons name="checkmark-circle" size={18} color={theme.success} /> : null}
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[2] }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[2], flexWrap: 'wrap', justifyContent: 'center' }}>
               <BloodGroupBadge group={profile.blood_group} size="sm" />
+              {isDonor ? <ReputationBadge totalDonations={donations} verified={profile.is_verified} size="sm" /> : null}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[1] }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: available ? theme.success : theme.warning }} />
                 <Text variant="caption" tone={available ? 'success' : 'warning'}>
@@ -108,7 +112,7 @@ export default function ProfileScreen() {
           </View>
           <View style={{ width: 1, height: 32, backgroundColor: theme.divider }} />
           <View style={{ flex: 1, alignItems: 'center', gap: 2 }}>
-            <Text variant="title" style={{ fontVariant: ['tabular-nums'], color: theme.primary }}>{profile.total_donations}</Text>
+            <Text variant="title" style={{ fontVariant: ['tabular-nums'], color: theme.primary }}>{livesHelped(donations)}</Text>
             <Text variant="overline" tone="muted">Lives helped</Text>
           </View>
           <View style={{ width: 1, height: 32, backgroundColor: theme.divider }} />
@@ -117,6 +121,40 @@ export default function ProfileScreen() {
             <Text variant="overline" tone="muted">Cooldown days</Text>
           </View>
         </Card>
+
+        {isDonor ? (
+          <View style={{ gap: Spacing[2] }}>
+            <Text variant="overline" tone="muted" style={{ marginLeft: Spacing[2] }}>Your standing</Text>
+            <Card variant="elevated" style={{ gap: Spacing[3] }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing[2] }}>
+                <ReputationBadge totalDonations={donations} verified={profile.is_verified} />
+                {profile.is_verified ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[1] }}>
+                    <Ionicons name="shield-checkmark" size={16} color={theme.success} />
+                    <Text variant="caption" tone="success">Verified donor</Text>
+                  </View>
+                ) : null}
+              </View>
+              <Text variant="bodySm" tone="secondary">{rep.current.blurb}</Text>
+              {rep.next ? (
+                <View style={{ gap: Spacing[2] }}>
+                  <View
+                    accessibilityRole="progressbar"
+                    accessibilityLabel={`${rep.remaining} donations to ${rep.next.label}`}
+                    style={{ height: 8, borderRadius: Radius.pill, backgroundColor: theme.pillBg, overflow: 'hidden' }}
+                  >
+                    <View style={{ width: `${Math.round(rep.fraction * 100)}%`, height: '100%', backgroundColor: theme.primary, borderRadius: Radius.pill }} />
+                  </View>
+                  <Text variant="caption" tone="muted">
+                    {rep.remaining} more {rep.remaining === 1 ? 'donation' : 'donations'} to reach {rep.next.label}
+                  </Text>
+                </View>
+              ) : (
+                <Text variant="caption" tone="success">You have reached the highest tier. Thank you for showing up, again and again.</Text>
+              )}
+            </Card>
+          </View>
+        ) : null}
 
         <Pressable
           onPress={() => { void Haptics.selectionAsync(); router.push('/profile/edit'); }}

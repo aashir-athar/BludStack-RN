@@ -50,6 +50,11 @@ async function authHeader(): Promise<Record<string, string>> {
 
 type RequestOpts = { signal?: AbortSignal };
 
+// The backend wraps successful responses as { success, data, message } and errors
+// as { error } / { message }. Some endpoints return the payload directly, so every
+// field is optional and the unwrap below handles both shapes.
+type ResponseEnvelope = { data?: unknown; error?: string; message?: string };
+
 async function request<T>(
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
@@ -68,8 +73,8 @@ async function request<T>(
     signal: opts.signal,
   });
 
-  let json: any = null;
-  try { json = await res.json(); } catch { /* empty body */ }
+  let json: ResponseEnvelope | null = null;
+  try { json = (await res.json()) as ResponseEnvelope; } catch { /* empty body */ }
 
   if (!res.ok) {
     const message = json?.error ?? json?.message ?? `Request failed (${res.status})`;
@@ -163,11 +168,11 @@ export const apiListRequests = (q: ListRequestsQuery = {}) => {
   if (q.page !== undefined)       qs.set('page',       String(q.page));
   if (q.limit !== undefined)      qs.set('limit',      String(q.limit));
   const suffix = qs.toString() ? `?${qs}` : '';
-  return request<{ requests: any[]; pagination: any }>('GET', `/requests${suffix}`);
+  return request<{ requests: unknown[]; pagination: unknown }>('GET', `/requests${suffix}`);
 };
 
-export const apiGetRequest = (id: string) => request<any>('GET', `/requests/${id}`);
-export const apiGetMyRequests = () => request<any[]>('GET', '/requests/my');
+export const apiGetRequest = (id: string) => request<unknown>('GET', `/requests/${id}`);
+export const apiGetMyRequests = () => request<unknown[]>('GET', '/requests/my');
 export const apiCancelRequest = (id: string) =>
   request<unknown>('PATCH', `/requests/${id}/status`, { status: 'cancelled' });
 export const apiDeleteRequest = (id: string) => request<null>('DELETE', `/requests/${id}`);
@@ -184,7 +189,7 @@ export const apiCompleteDonation = (requestId: string, donorId: string) =>
     'POST', '/donations/complete', { requestId, donorId },
   );
 
-export const apiDonationHistory = () => request<any[]>('GET', '/donations/history');
+export const apiDonationHistory = () => request<unknown[]>('GET', '/donations/history');
 
 export const apiDonationHeartbeat = (requestId: string, latitude: number, longitude: number) =>
   request<{ ok: true }>('POST', '/donations/heartbeat', { requestId, latitude, longitude });
@@ -200,6 +205,6 @@ export const apiSendTestNotification = () =>
   request<unknown>('POST', '/notifications/test', {});
 
 // ── Stats ────────────────────────────────────────────────────────────────────
-export const apiCommunityStats   = () => request<any>('GET', '/stats/community');
-export const apiLeaderboard      = () => request<any[]>('GET', '/stats/leaderboard');
-export const apiBloodAvailability = () => request<any>('GET', '/stats/blood-availability');
+export const apiCommunityStats   = () => request<unknown>('GET', '/stats/community');
+export const apiLeaderboard      = () => request<unknown[]>('GET', '/stats/leaderboard');
+export const apiBloodAvailability = () => request<unknown>('GET', '/stats/blood-availability');

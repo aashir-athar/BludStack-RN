@@ -21,6 +21,7 @@ import {
   Button,
   Skeleton,
   BloodGroupBadge,
+  ReputationBadge,
   EmptyState,
   ScreenHeader,
 } from '@/ui';
@@ -243,7 +244,10 @@ export default function DonorProfileScreen() {
             </View>
           </View>
 
-          <BloodGroupBadge group={donor.blood_group} size="lg" />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[2], flexWrap: 'wrap', justifyContent: 'center' }}>
+            <BloodGroupBadge group={donor.blood_group} size="lg" />
+            <ReputationBadge totalDonations={totalDonations} verified={donor.is_verified ?? false} />
+          </View>
 
           {/* Trust stats row */}
           <View style={[styles.statsRow, { borderTopColor: theme.border }]}>

@@ -10,6 +10,7 @@ import { useAppTheme } from '@/stores/themeStore';
 import { Text } from './Text';
 import { Card } from './Card';
 import { BloodGroupBadge } from './BloodGroupBadge';
+import { ReputationBadge } from './ReputationBadge';
 import { PressableScale } from './PressableScale';
 
 export interface ProfileCardData {
@@ -76,11 +77,9 @@ function ProfileCardImpl({ profile, onPress, compact, contact }: ProfileCardProp
               <Text variant="titleSm" numberOfLines={1} style={{ flexShrink: 1 }}>{profile.full_name}</Text>
               {profile.is_verified ? <Ionicons name="checkmark-circle" size={15} color={theme.success} /> : null}
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[2] }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[2], flexWrap: 'wrap' }}>
               {profile.total_donations != null ? (
-                <Text variant="caption" tone="muted" style={{ fontVariant: ['tabular-nums'] }}>
-                  {profile.total_donations} {profile.total_donations === 1 ? 'donation' : 'donations'}
-                </Text>
+                <ReputationBadge totalDonations={profile.total_donations} size="sm" />
               ) : null}
               {distance ? <Text variant="caption" tone="tertiary" style={{ fontVariant: ['tabular-nums'] }}>{distance} away</Text> : null}
             </View>
