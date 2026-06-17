@@ -3,7 +3,7 @@
 // Lever: low-friction commitment. No password, just an email and a 6-digit code.
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
+import { useForm, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowLeft, Mail } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -26,8 +26,14 @@ export default function SignInPage() {
     if (!authLoading && session) router.replace(onboarded ? "/feed" : "/onboarding");
   }, [authLoading, session, onboarded, router]);
 
-  const emailForm = useForm<EmailForm>({ resolver: zodResolver(emailSchema), defaultValues: { email: "" } });
-  const otpForm = useForm<OtpForm>({ resolver: zodResolver(otpSchema), defaultValues: { code: "" } });
+  const emailForm = useForm<EmailForm>({
+    resolver: zodResolver(emailSchema) as Resolver<EmailForm>,
+    defaultValues: { email: "" },
+  });
+  const otpForm = useForm<OtpForm>({
+    resolver: zodResolver(otpSchema) as Resolver<OtpForm>,
+    defaultValues: { code: "" },
+  });
 
   const onEmail = emailForm.handleSubmit(async ({ email }) => {
     setSending(true);

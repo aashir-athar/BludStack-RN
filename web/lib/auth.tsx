@@ -3,7 +3,7 @@
 // Web auth context - the analogue of the app's authStore. Tracks the Supabase
 // session, loads the user's own profile (RLS allows the own-row SELECT), and
 // exposes role helpers + sign-out + profile mutation through the backend.
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import { apiUpdateProfile, type ProfilePatch } from "./api";
@@ -68,39 +68,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [loadFor]);
 
-  const refreshProfile = useCallback(async () => {
+  // Plain handlers + value object. AuthProvider only re-renders on auth state
+  // changes (session / profile / loading), so there is nothing to memoize away.
+  const refreshProfile = async () => {
     if (session?.user?.id) setProfile(await fetchProfile(session.user.id));
-  }, [session?.user?.id]);
+  };
 
-  const updateProfile = useCallback(
-    async (patch: ProfilePatch) => {
-      const updated = (await apiUpdateProfile(patch)) as UserProfile;
-      // The server response is canonical (it may normalise, e.g. role downgrade).
-      setProfile((prev) => (prev ? { ...prev, ...updated } : updated));
-    },
-    [],
-  );
+  const updateProfile = async (patch: ProfilePatch) => {
+    const updated = (await apiUpdateProfile(patch)) as UserProfile;
+    // The server response is canonical (it may normalise, e.g. role downgrade).
+    setProfile((prev) => (prev ? { ...prev, ...updated } : updated));
+  };
 
-  const signOut = useCallback(async () => {
+  const signOut = async () => {
     await supabase.auth.signOut();
     setProfile(null);
-  }, []);
+  };
 
-  const value = useMemo<AuthValue>(() => {
-    const role = profile?.role;
-    return {
-      session,
-      user: session?.user ?? null,
-      profile,
-      loading,
-      isDonor: role === "donor" || role === "both",
-      isRecipient: role === "recipient" || role === "both",
-      onboarded: !!profile?.full_name,
-      refreshProfile,
-      updateProfile,
-      signOut,
-    };
-  }, [session, profile, loading, refreshProfile, updateProfile, signOut]);
+  const role = profile?.role;
+  const value: AuthValue = {
+    session,
+    user: session?.user ?? null,
+    profile,
+    loading,
+    isDonor: role === "donor" || role === "both",
+    isRecipient: role === "recipient" || role === "both",
+    onboarded: !!profile?.full_name,
+    refreshProfile,
+    updateProfile,
+    signOut,
+  };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

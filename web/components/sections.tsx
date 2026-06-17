@@ -273,7 +273,7 @@ function CallToAction() {
         </p>
         <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <a
-            href="#top"
+            href="/signin"
             className="inline-flex w-full items-center justify-center rounded-full bg-crimson-600 px-8 py-4 text-base font-semibold text-white shadow-xl shadow-crimson-600/25 transition-transform hover:bg-crimson-500 active:scale-[0.98] sm:w-auto"
           >
             Get the app
