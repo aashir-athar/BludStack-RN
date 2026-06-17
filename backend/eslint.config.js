@@ -56,4 +56,22 @@ module.exports = [
       eqeqeq: ['warn', 'smart'],
     },
   },
+  {
+    // Jest injects these as globals into every test module.
+    files: ['__tests__/**/*.js', '**/*.test.js'],
+    languageOptions: {
+      globals: {
+        ...nodeGlobals,
+        jest: 'readonly',
+        describe: 'readonly',
+        it: 'readonly',
+        test: 'readonly',
+        expect: 'readonly',
+        beforeAll: 'readonly',
+        afterAll: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+      },
+    },
+  },
 ];
