@@ -70,8 +70,8 @@ export function getMapStyleJSON(isDark: boolean): string {
 }
 
 // MapLibre coordinate order is [longitude, latitude] (GeoJSON convention),
-// the opposite of react-native-maps' { latitude, longitude }. Helpers keep
-// the screens readable.
+// the opposite of the { latitude, longitude } order the rest of the app uses.
+// These helpers keep the screens readable.
 export const lonLat = (latitude: number, longitude: number): [number, number] => [longitude, latitude];
 
 // Approximate zoom level that frames `radiusKm` around the given point.

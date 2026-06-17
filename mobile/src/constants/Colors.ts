@@ -143,7 +143,7 @@ export const Colors = {
     pillBg:         palette.onyx800,
     pillBgStrong:   palette.onyx750,
 
-    // ── Map (for react-native-maps custom style) ──────────────────────────
+    // ── Map (tints layered over the MapLibre raster basemap) ──────────────
     mapBg:          palette.onyx900,
   },
   light: {
