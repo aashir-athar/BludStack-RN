@@ -1,0 +1,129 @@
+@import "tailwindcss";
+
+/* ───────────────────────────────────────────────────────────────────────────
+   BludStack web design tokens. Ported 1:1 from the app's palette
+   (mobile/src/constants/Colors.ts) so the site and the app read as one product:
+   crimson signature, warm onyx in the dark, warm bone in the light.
+   ─────────────────────────────────────────────────────────────────────────── */
+@theme {
+  /* Crimson - the medical signature */
+  --color-crimson-50: #fdf1f4;
+  --color-crimson-100: #fde4ea;
+  --color-crimson-200: #fbc7d1;
+  --color-crimson-300: #f69cac;
+  --color-crimson-400: #ef5570;
+  --color-crimson-500: #e5314f;
+  --color-crimson-600: #d4183d;
+  --color-crimson-700: #c8163c;
+  --color-crimson-800: #a41030;
+  --color-crimson-900: #7a0c20;
+
+  /* Saline - trust / success (green) */
+  --color-saline-400: #3dd49b;
+  --color-saline-500: #14c083;
+  --color-saline-600: #0ea371;
+
+  /* Plasma - urgency / warning (amber) */
+  --color-plasma-400: #ffb94d;
+  --color-plasma-500: #f5a623;
+  --color-plasma-600: #e08410;
+
+  /* Onyx - warm neutral dark */
+  --color-onyx-950: #0a0910;
+  --color-onyx-900: #0f0e14;
+  --color-onyx-850: #161520;
+  --color-onyx-800: #1c1b27;
+  --color-onyx-750: #23222e;
+  --color-onyx-700: #2c2b38;
+  --color-onyx-600: #3a3946;
+  --color-onyx-500: #4e4d5a;
+  --color-onyx-400: #6c6b78;
+  --color-onyx-300: #8c8b96;
+  --color-onyx-200: #b5b4bc;
+  --color-onyx-100: #d7d6dc;
+
+  /* Bone - warm neutral light */
+  --color-bone-50: #faf8f5;
+  --color-bone-100: #f4f2ee;
+  --color-bone-200: #eae7e2;
+  --color-bone-300: #ddd9d2;
+
+  --color-background: var(--color-onyx-950);
+  --color-surface: var(--color-onyx-900);
+  --color-surface-2: var(--color-onyx-850);
+
+  --radius-pill: 9999px;
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --animate-rise: rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-pulse-ring: pulse-ring 3.2s ease-out infinite;
+  --animate-float: float 7s ease-in-out infinite;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.35);
+    opacity: 0.55;
+  }
+  80%,
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-bone-100);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Subtle staggered reveal helper (CSS-only, no JS). */
+.stagger > * {
+  animation: var(--animate-rise);
+  animation-delay: calc(var(--i, 0) * 90ms);
+}
+
+::selection {
+  background: var(--color-crimson-500);
+  color: #fff;
+}
