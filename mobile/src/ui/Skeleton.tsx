@@ -1,5 +1,5 @@
 // ui/Skeleton.tsx
-// The ONLY loading primitive — a Reanimated shimmer placeholder. Never an
+// The ONLY loading primitive - a Reanimated shimmer placeholder. Never an
 // ActivityIndicator, never a spinner. Match the geometry of the content it
 // stands in for, then swap it out when data arrives.
 import React, { useEffect } from 'react';

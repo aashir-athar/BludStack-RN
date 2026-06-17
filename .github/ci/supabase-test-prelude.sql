@@ -4,7 +4,7 @@
 -- `supabase_realtime` publication out of the box. A vanilla Postgres service has
 -- none of those, so we create the minimum surface the schema references before
 -- applying it. This proves the DDL, RLS policies, grants, triggers, and indexes
--- all apply cleanly — it is not a runtime auth emulation.
+-- all apply cleanly - it is not a runtime auth emulation.
 
 create extension if not exists "uuid-ossp";
 create extension if not exists "pgcrypto";
@@ -19,7 +19,7 @@ create table if not exists auth.users (
   created_at         timestamptz default now()
 );
 
--- auth.uid() — the only auth.* function the policies call. Resolves from a JWT
+-- auth.uid() - the only auth.* function the policies call. Resolves from a JWT
 -- claim GUC when present, else null (no rows visible), matching Supabase.
 create or replace function auth.uid()
 returns uuid

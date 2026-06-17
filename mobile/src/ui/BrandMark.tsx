@@ -1,5 +1,5 @@
 // ui/BrandMark.tsx
-// Vector blood-drop — the brand glyph that replaces the literal blood-drop emoji
+// Vector blood-drop - the brand glyph that replaces the literal blood-drop emoji
 // everywhere. Crisp at any size, themed via the store. Variants: solid/outline/ghost.
 import React from 'react';
 import Svg, { Path } from 'react-native-svg';

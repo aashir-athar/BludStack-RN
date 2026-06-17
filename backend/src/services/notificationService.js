@@ -43,7 +43,7 @@ async function sendPushNotifications(messages) {
     //   `mutableContent` enables our notification-service extension (if any)
     //   to enrich the payload before display.
     // Android: `priority: 'high'` maps to FCM `priority: high` (wakes the
-    //   device immediately). `ttl: 0` tells FCM "deliver now or drop" — so a
+    //   device immediately). `ttl: 0` tells FCM "deliver now or drop" - so a
     //   2-hour-stale 'blood needed' push never wakes someone at midnight.
     // Both: `_displayInForeground` ensures the notification still shows when
     //   the app is in the foreground (default behaviour suppresses it).
@@ -59,7 +59,7 @@ async function sendPushNotifications(messages) {
       priority:  isEmergency ? 'high' : 'normal',
       ttl:       isEmergency ? 0 : 3600,
       mutableContent: true,
-      // iOS-only — Expo passes this through to APNs
+      // iOS-only - Expo passes this through to APNs
       ...(isEmergency ? { _category: 'emergency', interruptionLevel: 'time-sensitive' } : { interruptionLevel: 'active' }),
     });
   }
@@ -71,7 +71,7 @@ async function sendPushNotifications(messages) {
 
   // Map each ticket back to its token by reading it from the SAME chunk array
   // the tickets came from (`chunk[i].to`). Tickets are returned 1:1 and in
-  // order with the messages in their chunk, so this is exact — and it removes
+  // order with the messages in their chunk, so this is exact - and it removes
   // the global-cursor index-drift class of bug, where a chunk returning fewer
   // tickets than messages would mis-align every subsequent token.
   const deadTokens = new Set();
@@ -160,7 +160,7 @@ async function notifyRecipientDonorAccepted({ token, donorName, bloodGroup, requ
 async function notifyDonorDonationComplete({ token, donorName, totalDonations, requestId }) {
   return sendPushNotifications([{
     token,
-    title:     `Donation recorded — thank you, ${donorName}`,
+    title:     `Donation recorded - thank you, ${donorName}`,
     body:      `That's ${totalDonations} donation${totalDonations !== 1 ? 's' : ''} so far. Someone got the blood they needed because of you.`,
     data:      { type: 'DONATION_COMPLETE', requestId },
     channelId: 'default',
@@ -177,7 +177,7 @@ async function notifyRequestStillOpen({ token, bloodGroup, requestId, ringKm }) 
   return sendPushNotifications([{
     token,
     title:     `Still finding ${bloodGroup} donors`,
-    body:      `We widened the search ${where}. Hang tight — we'll keep looking.`,
+    body:      `We widened the search ${where}. Hang tight - we'll keep looking.`,
     data:      { type: 'SEARCH_EXPANDING', requestId, ringKm },
     channelId: 'default',
     sound:     'default',

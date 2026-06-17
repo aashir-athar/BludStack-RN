@@ -1,5 +1,5 @@
 // constants/Colors.ts
-// BludStack — 2026 brand palette.
+// BludStack - 2026 brand palette.
 // Distinct from Uber. Warm onyx, warm bone, crimson-on-saline duality.
 // Designed for medical urgency + emotional trust. Every token is semantic.
 
@@ -8,7 +8,7 @@ export const palette = {
   pure: '#FFFFFF',
   ink:  '#000000',
 
-  // ── Crimson — the brand signature. Warmer than Uber red, more medical.
+  // ── Crimson - the brand signature. Warmer than Uber red, more medical.
   crimson900: '#7A0C20',
   crimson800: '#A41030',
   crimson700: '#C8163C',
@@ -20,7 +20,7 @@ export const palette = {
   crimson100: '#FDE4EA',
   crimson050: '#FDF1F4',
 
-  // ── Saline — trust + medical green. Used for success, verified, available.
+  // ── Saline - trust + medical green. Used for success, verified, available.
   saline900: '#04382A',
   saline800: '#075A41',
   saline700: '#0B7C58',
@@ -31,7 +31,7 @@ export const palette = {
   saline200: '#B6F0D6',
   saline100: '#DCF7E8',
 
-  // ── Plasma — amber for "urgent" tier. Warmer than pure orange.
+  // ── Plasma - amber for "urgent" tier. Warmer than pure orange.
   plasma900: '#5F3700',
   plasma800: '#8A4E00',
   plasma700: '#B86B0A',
@@ -42,7 +42,7 @@ export const palette = {
   plasma200: '#FFE3B0',
   plasma100: '#FFF1D6',
 
-  // ── Onyx — dark surfaces. Warm undertone, never pure black.
+  // ── Onyx - dark surfaces. Warm undertone, never pure black.
   onyx950: '#0A0910',
   onyx900: '#0F0E14',
   onyx850: '#161520',
@@ -56,7 +56,7 @@ export const palette = {
   onyx200: '#B5B4BC',
   onyx100: '#D7D6DC',
 
-  // ── Bone — light surfaces. Warm off-white, never pure white.
+  // ── Bone - light surfaces. Warm off-white, never pure white.
   bone050: '#FAF8F5',
   bone100: '#F4F2EE',
   bone200: '#EAE7E2',

@@ -1,5 +1,5 @@
 // stores/toastStore.ts
-// Toast as a Zustand store — replaces ToastContext. One animated pill, auto-
+// Toast as a Zustand store - replaces ToastContext. One animated pill, auto-
 // dismiss, theme-aware. The viewport (ui/Toast.tsx) reads `current` and renders.
 //
 //   const toast = useToast();

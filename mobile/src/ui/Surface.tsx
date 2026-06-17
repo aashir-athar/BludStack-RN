@@ -1,5 +1,5 @@
 // ui/Surface.tsx
-// Platform-aware translucent surface — the non-negotiable decision tree lives
+// Platform-aware translucent surface - the non-negotiable decision tree lives
 // here so no screen ever reaches for BlurView / GlassView directly:
 //   • iOS >= 26 -> expo-glass-effect (Liquid Glass)
 //   • iOS < 26  -> expo-blur BlurView
@@ -76,7 +76,7 @@ function SurfaceImpl({
         </BlurView>
       );
     }
-    // Android — flat themed surface with elevation.
+    // Android - flat themed surface with elevation.
     return (
       <View
         style={[base, { backgroundColor: theme.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.border }, Elevation.sm, style]}

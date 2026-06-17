@@ -1,5 +1,5 @@
 // hooks/useChatTyping.ts
-// Typing indicator over Supabase Realtime `broadcast` — no DB writes.
+// Typing indicator over Supabase Realtime `broadcast` - no DB writes.
 // (Per skill 03_supabase_realtime_implementation.md: don't use postgres_changes
 //  for ephemeral typing state.)
 import { useCallback, useEffect, useRef, useState } from 'react';

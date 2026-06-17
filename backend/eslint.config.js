@@ -1,4 +1,4 @@
-// eslint.config.js — ESLint 9/10 flat config for the Node (CommonJS) backend.
+// eslint.config.js - ESLint 9/10 flat config for the Node (CommonJS) backend.
 // Self-contained (no @eslint/js / globals packages) so `npm ci` stays lean.
 'use strict';
 

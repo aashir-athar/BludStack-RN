@@ -2,7 +2,7 @@ name: eas-build
 
 # Owner-triggered cloud build. Runs on a version tag (v1.2.3) or manual dispatch.
 # Requires the EXPO_TOKEN repository secret (Expo access token). This does not run
-# on every push — device builds cost money and minutes.
+# on every push - device builds cost money and minutes.
 
 on:
   push:

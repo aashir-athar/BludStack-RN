@@ -24,7 +24,7 @@ const radiusScale = {
 
 const tokens = createTokens({
   ...defaultConfig.tokens,
-  // v4 keeps colours in themes, not tokens — add a colour token group so brand
+  // v4 keeps colours in themes, not tokens - add a colour token group so brand
   // colours are usable as $tokens (e.g. $crimson600, $saline500).
   color: palette,
   space: spaceScale,

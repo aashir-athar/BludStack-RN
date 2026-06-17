@@ -1,7 +1,7 @@
 // ui/Button.tsx
 // Pill button. Variants: primary/secondary/ghost/danger/success/outline; sizes
 // sm/md/lg/xl. Scale-on-press + optional commit haptic (Reanimated v4 worklets).
-// Loading state is a LABEL PULSE — never an ActivityIndicator/spinner.
+// Loading state is a LABEL PULSE - never an ActivityIndicator/spinner.
 import React, { useEffect } from 'react';
 import {
   Pressable, StyleSheet, type StyleProp, type ViewStyle,

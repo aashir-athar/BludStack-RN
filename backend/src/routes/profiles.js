@@ -45,7 +45,7 @@ router.patch(
     // `optional({ nullable: true })` so an explicit `null` from the client
     // (mobile sends `address.trim() || null` to clear the column) skips the
     // .isString() check. Without this, "clear the address" returns
-    // "address: Invalid value" — surfaced on profile/edit save.
+    // "address: Invalid value" - surfaced on profile/edit save.
     body('address').optional({ nullable: true }).isString().isLength({ max: 300 }),
   ],
   validate,

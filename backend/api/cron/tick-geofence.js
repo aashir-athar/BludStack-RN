@@ -1,5 +1,5 @@
 // api/cron/tick-geofence.js
-// Scheduled handler — drives the geo-fence ring expansion.
+// Scheduled handler - drives the geo-fence ring expansion.
 //
 // Vercel Hobby caps cron at DAILY, which is useless for ring expansion.
 // `vercel.json` therefore does NOT register a Vercel Cron entry; instead this
@@ -20,7 +20,7 @@ const { tick } = require('../../src/services/geoFencingService');
 
 function isAuthorised(req) {
   const secret = process.env.CRON_SECRET;
-  // Fail closed in production — a missing secret must never leave the cron
+  // Fail closed in production - a missing secret must never leave the cron
   // endpoint publicly triggerable. Open only outside production for local dev.
   if (!secret) return process.env.NODE_ENV !== 'production';
   const auth  = req.headers?.authorization ?? '';

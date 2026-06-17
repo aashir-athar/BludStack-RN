@@ -3,13 +3,13 @@
 // Donor ↔ Recipient chat for a single blood_request thread.
 //
 // Architecture (mirrors realtime-chat-expo-54-55 skill, Supabase Realtime path):
-//   • Initial paginated load — oldest-first array (newest at END of array).
+//   • Initial paginated load - oldest-first array (newest at END of array).
 //   • Realtime subscription on INSERT / UPDATE / DELETE filtered by request_id;
-//     reconciles by client_id (the idempotency key) — optimistic message gets
+//     reconciles by client_id (the idempotency key) - optimistic message gets
 //     swapped for the server row in-place.
 //   • Optimistic send: append locally with status='sending', then INSERT.
 //     If the INSERT fails the message is marked 'failed' for retry.
-//   • Cleanup via supabase.removeChannel — without this, channels leak after
+//   • Cleanup via supabase.removeChannel - without this, channels leak after
 //     ~10 navigations and the WebSocket queue silently fills up.
 //   • RLS ensures only the two parties of the message can read it; INSERT is
 //     gated by the accepted-donation relationship between sender/receiver.
@@ -133,7 +133,7 @@ export function useChatMessages(
       .subscribe();
 
     return () => {
-      // Cleanup is the entire game — without removeChannel, sockets leak.
+      // Cleanup is the entire game - without removeChannel, sockets leak.
       supabase.removeChannel(channel);
     };
   }, [requestId, myId, otherId]);
@@ -236,7 +236,7 @@ export function useChatMessages(
         client_id:   msg.client_id,
       });
     if (error) {
-      // Unique-constraint violation on retry of an already-inserted row is fine —
+      // Unique-constraint violation on retry of an already-inserted row is fine -
       // realtime will deliver and reconcile. Otherwise mark failed again.
       const isDupe = /duplicate key|unique/i.test(error.message);
       if (!isDupe) {

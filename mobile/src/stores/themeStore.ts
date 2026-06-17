@@ -1,5 +1,5 @@
 // stores/themeStore.ts
-// Tri-state theme ('system' | 'dark' | 'light') as a Zustand store — replaces
+// Tri-state theme ('system' | 'dark' | 'light') as a Zustand store - replaces
 // ThemeContext. Self-initialising: subscribes to OS appearance + hydrates the
 // persisted choice at module load, so no provider is required.
 //
@@ -19,7 +19,7 @@ export type ThemeMode = 'dark' | 'light' | 'system';
 type SystemScheme = 'dark' | 'light';
 
 function readSystem(): SystemScheme {
-  // Unknown (null/undefined) defaults to dark — matches the brand palette and
+  // Unknown (null/undefined) defaults to dark - matches the brand palette and
   // avoids a light flash on a dark device.
   return Appearance.getColorScheme() === 'light' ? 'light' : 'dark';
 }

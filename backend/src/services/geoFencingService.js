@@ -4,18 +4,18 @@
 /**
  * Geo-fencing expansion service.
  *
- * Architecture (post-hardening — fixes flaws #7, #9, #10):
+ * Architecture (post-hardening - fixes flaws #7, #9, #10):
  *   • State is persisted in `blood_requests.geofence_ring_index` and
  *     `blood_requests.geofence_next_at`. There is NO in-memory Map.
  *   • A single tick worker runs every 5 s on every backend instance.
  *     Each tick picks up requests whose `geofence_next_at <= now()` using
- *     SELECT ... FOR UPDATE SKIP LOCKED — safe across multiple instances.
+ *     SELECT ... FOR UPDATE SKIP LOCKED - safe across multiple instances.
  *   • Per-ring donor eligibility is re-queried each tick (so a donor who
  *     toggles availability off mid-expansion is excluded immediately).
  *   • Donors who DECLINED a request are excluded from future rings.
  *   • If the recipient cancels (status=cancelled) or someone accepts
  *     (status flipped or geofence_next_at cleared), the worker simply
- *     skips that request — no setTimeout to cancel.
+ *     skips that request - no setTimeout to cancel.
  *
  * Flow:
  *   POST /requests  →  inserts blood_request with geofence_next_at = now()
@@ -146,7 +146,7 @@ async function notifyRecipientExpansion(request, ringKm) {
 // ────────────────────────────────────────────────────────────────────────────
 
 async function expandOne(request) {
-  // Defensive re-check status — request may have been cancelled/fulfilled
+  // Defensive re-check status - request may have been cancelled/fulfilled
   // between the worker SELECT and our re-fetch.
   if (request.status !== 'active') return clearFence(request.id);
 
@@ -158,7 +158,7 @@ async function expandOne(request) {
       ?? detectCountryCode(request.latitude, request.longitude);
 
     if (!code) {
-      console.log(`[geoFence] req=${request.id} | country unknown — fence complete`);
+      console.log(`[geoFence] req=${request.id} | country unknown - fence complete`);
       return clearFence(request.id);
     }
 
@@ -187,8 +187,8 @@ async function expandOne(request) {
 
   await notifyDonors(request, inRing);
 
-  // From ring 1 onward, nudge the recipient that the search is widening —
-  // whether or not this ring surfaced new donors — so they know we're trying.
+  // From ring 1 onward, nudge the recipient that the search is widening -
+  // whether or not this ring surfaced new donors - so they know we're trying.
   // The per-request CAS claim in tick() guarantees one instance per ring, so
   // this fires at most once per expansion (no duplicate "still searching" push).
   if (ringIndex > 0) {
@@ -249,7 +249,7 @@ async function cancelGeoFencing(requestId) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Tick worker — runs every TICK_INTERVAL_MS
+// Tick worker - runs every TICK_INTERVAL_MS
 // ────────────────────────────────────────────────────────────────────────────
 
 async function tick() {
@@ -279,7 +279,7 @@ async function tick() {
         .maybeSingle();
       if (!claim.data) continue; // another instance won the claim
 
-      // expand outside the claim — restore geofence_next_at when scheduling next ring
+      // expand outside the claim - restore geofence_next_at when scheduling next ring
       await expandOne(req).catch(err =>
         console.error(`[geoFence] expand failed req=${req.id}:`, err.message)
       );
@@ -293,7 +293,7 @@ function startWorker() {
   if (tickHandle) return;
   tickHandle = setInterval(tick, TICK_INTERVAL_MS);
   if (typeof tickHandle.unref === 'function') tickHandle.unref();
-  console.log(`[geoFence] worker started — tick every ${TICK_INTERVAL_MS / 1000}s`);
+  console.log(`[geoFence] worker started - tick every ${TICK_INTERVAL_MS / 1000}s`);
 }
 
 function stopWorker() {
@@ -301,7 +301,7 @@ function stopWorker() {
 }
 
 /**
- * For backwards-compat with cron health log — counts requests with an active fence.
+ * For backwards-compat with cron health log - counts requests with an active fence.
  */
 async function activeJobCount() {
   const { count } = await supabaseAdmin

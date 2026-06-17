@@ -4,7 +4,7 @@
 //
 //   • Light → OpenStreetMap's standard raster tiles (free, no key, no quota
 //             at hobby scale; respect tile usage policy at scale).
-//   • Dark  → CARTO's "Dark Matter (no labels removed)" raster tiles —
+//   • Dark  → CARTO's "Dark Matter (no labels removed)" raster tiles -
 //             free, no key, derived from OSM data, CC-BY 3.0.
 //
 // Both servers serve standard 256×256 raster tiles. MapLibre composes them

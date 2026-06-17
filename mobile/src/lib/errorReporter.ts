@@ -1,5 +1,5 @@
 // lib/errorReporter.ts
-// Typed logger wrapper. NO Sentry, NO Bugsnag, NO Crashlytics — by design.
+// Typed logger wrapper. NO Sentry, NO Bugsnag, NO Crashlytics - by design.
 // In dev: console.warn/error. In release: silent no-op.
 // Replace later with a real sink IFF the app graduates to enterprise.
 

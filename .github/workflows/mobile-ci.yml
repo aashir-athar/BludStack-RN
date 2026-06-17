@@ -1,7 +1,7 @@
 name: mobile-ci
 
 # Static verification for the Expo app: install, typecheck, lint, unit tests,
-# Expo health, and a Metro bundle. No device build here — that lives in
+# Expo health, and a Metro bundle. No device build here - that lives in
 # eas-build.yml and is owner-triggered.
 
 on:

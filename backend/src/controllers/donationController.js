@@ -55,7 +55,7 @@ async function acceptRequest(req, res, next) {
     if (rpcErr) throw rpcErr;
 
     const row = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
-    if (!row) return error(res, 'Accept failed — no result from database', 500);
+    if (!row) return error(res, 'Accept failed - no result from database', 500);
     if (!row.response_id) {
       const status = /not found/i.test(row.message) ? 404
                    : /already/i.test(row.message)   ? 409
@@ -99,7 +99,7 @@ async function acceptRequest(req, res, next) {
           : null,
       },
       row.message === 'Already accepted'
-        ? 'You already accepted — head to the hospital.'
+        ? 'You already accepted - head to the hospital.'
         : 'You have accepted the request. Please head to the hospital as soon as possible.',
     );
   } catch (err) {
@@ -108,7 +108,7 @@ async function acceptRequest(req, res, next) {
 }
 
 /**
- * POST /api/v1/donations/decline — donor declines a request. Body: { requestId }
+ * POST /api/v1/donations/decline - donor declines a request. Body: { requestId }
  */
 async function declineRequest(req, res, next) {
   try {
@@ -183,7 +183,7 @@ async function completeDonation(req, res, next) {
 }
 
 /**
- * GET /api/v1/donations/history — authenticated user's donor history.
+ * GET /api/v1/donations/history - authenticated user's donor history.
  */
 async function getDonationHistory(req, res, next) {
   try {
@@ -224,7 +224,7 @@ async function heartbeat(req, res, next) {
       return error(res, 'Coordinates out of valid range', 400);
     }
 
-    // Single conditional UPDATE — race-free. Previously the controller did a
+    // Single conditional UPDATE - race-free. Previously the controller did a
     // SELECT to check status, then a separate UPDATE keyed only on id, leaving
     // a TOCTOU window where the response could flip to 'completed' or
     // 'declined' between the two queries and the heartbeat would still write

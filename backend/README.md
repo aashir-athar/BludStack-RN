@@ -1,6 +1,6 @@
-# 🩸 BludStack Backend API
+# BludStack Backend API
 
-Express.js REST API for BludStack — the community blood-donation matching app.
+Express.js REST API for BludStack - the community blood-donation matching app.
 
 ---
 
@@ -31,7 +31,7 @@ bludstack-backend/
 │   │   ├── errorHandler.js          ← Global error handler
 │   │   └── requestLogger.js         ← Request ID injection
 │   ├── services/
-│   │   ├── geoFencingService.js     ← Uber-surge ring expansion logic 🔑
+│   │   ├── geoFencingService.js     ← Uber-surge ring expansion logic 
 │   │   ├── notificationService.js   ← Expo push notification sender
 │   │   └── cronService.js           ← Background jobs (expire requests, etc.)
 │   └── utils/
@@ -89,8 +89,8 @@ curl http://localhost:4000/health
 |---|---|---|
 | `PORT` | No | Server port (default: 4000) |
 | `NODE_ENV` | No | `development` or `production` |
-| `SUPABASE_URL` | ✅ | Your Supabase project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | Service role key — bypasses RLS. **Keep secret.** |
+| `SUPABASE_URL` |  | Your Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` |  | Service role key - bypasses RLS. **Keep secret.** |
 | `ALLOWED_ORIGINS` | No | Comma-separated CORS origins (default: `*`) |
 | `RATE_LIMIT_WINDOW_MS` | No | Rate limit window in ms (default: 900000 = 15 min) |
 | `RATE_LIMIT_MAX` | No | Max requests per window per IP (default: 100) |
@@ -115,9 +115,9 @@ Protected endpoints require: `Authorization: Bearer <supabase_access_token>`
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/auth/me` | ✅ | Get your profile |
-| POST | `/auth/register` | ✅ | Create profile after first OTP login |
-| POST | `/auth/logout` | ✅ | Clear push token + invalidate session |
+| GET | `/auth/me` |  | Get your profile |
+| POST | `/auth/register` |  | Create profile after first OTP login |
+| POST | `/auth/logout` |  | Clear push token + invalidate session |
 
 **POST /auth/register** body:
 ```json
@@ -137,10 +137,10 @@ Protected endpoints require: `Authorization: Bearer <supabase_access_token>`
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/profiles/:id` | ✅ | Get a user's public profile |
-| PATCH | `/profiles/me` | ✅ | Update your profile |
-| PATCH | `/profiles/me/location` | ✅ | Update your GPS location |
-| GET | `/profiles/nearby-donors` | ✅ | Find available donors near a point |
+| GET | `/profiles/:id` |  | Get a user's public profile |
+| PATCH | `/profiles/me` |  | Update your profile |
+| PATCH | `/profiles/me/location` |  | Update your GPS location |
+| GET | `/profiles/nearby-donors` |  | Find available donors near a point |
 
 **GET /profiles/nearby-donors** query params:
 ```
@@ -153,12 +153,12 @@ lat=31.5204&lon=74.3587&radiusKm=10&bloodGroup=O+
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/requests` | ✅ | List active requests (with optional geo filter) |
-| POST | `/requests` | ✅ | Post a new blood request → triggers geo-fencing |
-| GET | `/requests/my` | ✅ | Your own requests |
-| GET | `/requests/:id` | ✅ | Get request detail with responses |
-| PATCH | `/requests/:id/status` | ✅ | Cancel or mark fulfilled (recipient only) |
-| DELETE | `/requests/:id` | ✅ | Delete a cancelled/expired request |
+| GET | `/requests` |  | List active requests (with optional geo filter) |
+| POST | `/requests` |  | Post a new blood request → triggers geo-fencing |
+| GET | `/requests/my` |  | Your own requests |
+| GET | `/requests/:id` |  | Get request detail with responses |
+| PATCH | `/requests/:id/status` |  | Cancel or mark fulfilled (recipient only) |
+| DELETE | `/requests/:id` |  | Delete a cancelled/expired request |
 
 **POST /requests** body:
 ```json
@@ -180,10 +180,10 @@ lat=31.5204&lon=74.3587&radiusKm=10&bloodGroup=O+
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/donations/accept` | ✅ | Donor accepts a request → notifies recipient |
-| POST | `/donations/decline` | ✅ | Donor declines a request |
-| POST | `/donations/complete` | ✅ | Recipient marks donation done → updates donor stats |
-| GET | `/donations/history` | ✅ | Your full donation history as a donor |
+| POST | `/donations/accept` |  | Donor accepts a request → notifies recipient |
+| POST | `/donations/decline` |  | Donor declines a request |
+| POST | `/donations/complete` |  | Recipient marks donation done → updates donor stats |
+| GET | `/donations/history` |  | Your full donation history as a donor |
 
 **POST /donations/accept** body:
 ```json
@@ -201,9 +201,9 @@ lat=31.5204&lon=74.3587&radiusKm=10&bloodGroup=O+
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| PUT | `/notifications/token` | ✅ | Register Expo push token |
-| DELETE | `/notifications/token` | ✅ | Remove push token (opt-out) |
-| POST | `/notifications/test` | ✅ | Send yourself a test notification |
+| PUT | `/notifications/token` |  | Register Expo push token |
+| DELETE | `/notifications/token` |  | Remove push token (opt-out) |
+| POST | `/notifications/test` |  | Send yourself a test notification |
 
 **PUT /notifications/token** body:
 ```json
@@ -272,10 +272,10 @@ Expiry windows by urgency:
 
 > **Geo-fence frequency differs by host.**
 > - On **Railway / Render / self-hosted** the `startWorker()` in `src/server.js` runs an in-process `setInterval` that ticks every **5 seconds**.
-> - On **Vercel** there is no in-process worker (functions are short-lived). The tick logic is exposed as HTTP endpoints (`api/cron/tick-geofence.js`, `api/cron/expire-requests.js`) and **must be triggered by an external scheduler** — Vercel Hobby is daily-only, Pro starts at 1 minute. See the Vercel section below for free schedulers that go down to 1 minute.
-> - Rate-limit state is in-memory (express-rate-limit default). On Vercel each cold start has its own bucket — for production-grade rate limiting on Vercel, swap in `rate-limit-redis` with Upstash.
+> - On **Vercel** there is no in-process worker (functions are short-lived). The tick logic is exposed as HTTP endpoints (`api/cron/tick-geofence.js`, `api/cron/expire-requests.js`) and **must be triggered by an external scheduler** - Vercel Hobby is daily-only, Pro starts at 1 minute. See the Vercel section below for free schedulers that go down to 1 minute.
+> - Rate-limit state is in-memory (express-rate-limit default). On Vercel each cold start has its own bucket - for production-grade rate limiting on Vercel, swap in `rate-limit-redis` with Upstash.
 
-### Option A — Vercel (serverless, $0)
+### Option A - Vercel (serverless, $0)
 
 1. Push this folder to a GitHub repo
 2. [vercel.com](https://vercel.com) → Add New → Project → import the repo
@@ -286,7 +286,7 @@ Expiry windows by urgency:
    - `NODE_ENV=production`
    - `ALLOWED_ORIGINS=https://your-app-domain.com`
    - `TRUST_PROXY=1`
-   - `CRON_SECRET=<generate a long random string>` — used to auth scheduler calls
+   - `CRON_SECRET=<generate a long random string>` - used to auth scheduler calls
 5. Deploy. `vercel.json` wires up:
    - `/api/v1/*` → Express app (via `api/index.js`)
    - `/health` → Express app
@@ -330,9 +330,9 @@ Pick one:
   ```
   Requires the `pg_net` extension in Supabase (enabled by default on Pro; on Free, Database → Extensions → enable `pg_net`).
 
-> Geo-fence ring delay defaults to **30 s** (`GEO_EXPANSION_DELAY_SECONDS`). On a 1-minute external tick, the effective ring cadence is 60 s — slightly slower than the 30 s on Railway but still responsive.
+> Geo-fence ring delay defaults to **30 s** (`GEO_EXPANSION_DELAY_SECONDS`). On a 1-minute external tick, the effective ring cadence is 60 s - slightly slower than the 30 s on Railway but still responsive.
 
-### Option B — Railway (recommended, free hobby tier)
+### Option B - Railway (recommended, free hobby tier)
 
 1. Push this folder to a GitHub repo
 2. Go to [railway.app](https://railway.app) → New Project → Deploy from GitHub
@@ -346,7 +346,7 @@ Pick one:
 
 Your API will be at: `https://bludstack-api.up.railway.app`
 
-### Option C — Render (free tier with spin-down)
+### Option C - Render (free tier with spin-down)
 
 1. Push to GitHub
 2. Go to [render.com](https://render.com) → New → Web Service
@@ -356,7 +356,7 @@ Your API will be at: `https://bludstack-api.up.railway.app`
 
 > **Note:** Render free tier spins down after 15 min of inactivity. First request after spin-down takes ~30s. Use Railway for always-on free hosting.
 
-### Option D — Self-hosted (VPS / DigitalOcean)
+### Option D - Self-hosted (VPS / DigitalOcean)
 
 ```bash
 # On your server
@@ -400,8 +400,8 @@ const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/requests`, {
 
 ## Security Notes
 
-- The `SUPABASE_SERVICE_ROLE_KEY` bypasses all Row Level Security — **never** expose it to clients
+- The `SUPABASE_SERVICE_ROLE_KEY` bypasses all Row Level Security - **never** expose it to clients
 - All mutating endpoints require a valid Supabase JWT
 - Rate limiting is applied globally (100 req/15 min) and strictly on auth endpoints (10 req/15 min)
 - Medical history is masked in all responses unless `share_medical_history = true`
-- Exact GPS coordinates are never returned to arbitrary callers — only to matched parties
+- Exact GPS coordinates are never returned to arbitrary callers - only to matched parties

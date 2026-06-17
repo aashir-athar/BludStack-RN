@@ -89,7 +89,7 @@ export const Spacing = {
   '3.5': 14,
 };
 
-// ── Radius — 2026 = generous curvature, pill shape is the default for actions
+// ── Radius - 2026 = generous curvature, pill shape is the default for actions
 export const Radius = {
   none:  0,
   xs:    6,
@@ -104,7 +104,7 @@ export const Radius = {
   full:  9999,
 };
 
-// ── Elevation — restrained, no harsh shadows. iOS uses opacity, Android elevation
+// ── Elevation - restrained, no harsh shadows. iOS uses opacity, Android elevation
 export const Elevation = {
   none: { shadowColor: 'transparent', shadowOpacity: 0, shadowRadius: 0, shadowOffset: { width: 0, height: 0 }, elevation: 0 },
   xs: {
@@ -143,7 +143,7 @@ export const Elevation = {
 export const Shadow = Elevation;
 
 // ── Semantic type roles ─────────────────────────────────────────────────────
-// One source of truth — components compose these.
+// One source of truth - components compose these.
 export type TypographyRole =
   | 'display' | 'headline' | 'title' | 'titleSm'
   | 'body'    | 'bodySm'   | 'label' | 'labelSm'
@@ -223,7 +223,7 @@ export const Type: Record<TypographyRole, TextStyle> = {
   },
 };
 
-// ── Motion tokens — Reanimated v4 worklet-friendly ──────────────────────────
+// ── Motion tokens - Reanimated v4 worklet-friendly ──────────────────────────
 // One curve to rule them all (in-out, slight overshoot on bigger moves).
 export const Motion = {
   duration: {

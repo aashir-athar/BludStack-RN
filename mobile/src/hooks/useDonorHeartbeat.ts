@@ -4,7 +4,7 @@
 // until they arrive. This is the hardest reliability problem in the app: the
 // donor is driving, the screen is off, the OS wants to reclaim the process.
 //
-// expo-persistent-background-location solves the survival half — a `location`-
+// expo-persistent-background-location solves the survival half - a `location`-
 // typed foreground service on Android (survives swipe-to-kill) and significant-
 // location-change monitoring on iOS (resumes after force-quit). We own the
 // delivery half: each fix is POSTed to /donations/heartbeat under the donor's
@@ -66,7 +66,7 @@ function metresBetween(a: HeartbeatCoords, b: HeartbeatCoords): number {
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
-// The persistent module is native — absent in Expo Go. Resolve it lazily so
+// The persistent module is native - absent in Expo Go. Resolve it lazily so
 // importing this hook never crashes the bundle on a client that lacks the build.
 type BgModule = typeof import('expo-persistent-background-location');
 function loadBgModule(): BgModule | null {
@@ -83,7 +83,7 @@ const FOREGROUND_NOTIFICATION = {
   notificationBody: 'The recipient can see you on the way. Tap to return.',
   notificationChannelId: 'bludstack_live_location',
   notificationChannelName: 'Live location sharing',
-  notificationColor: '#E5314F', // crimson500 — keeps the service notification on-brand
+  notificationColor: '#E5314F', // crimson500 - keeps the service notification on-brand
 } as const;
 
 /**
@@ -103,7 +103,7 @@ export function useDonorHeartbeat(
   const lastCoordsRef = useRef<HeartbeatCoords | null>(null);
   const stoppedRef    = useRef(false);
 
-  // Throttled push to the backend — the source of truth for the recipient's
+  // Throttled push to the backend - the source of truth for the recipient's
   // live pin. A terminal 400/404/409 means the donation is no longer accepted:
   // stand down for good.
   const pushFix = useCallback(async (c: HeartbeatCoords) => {
@@ -125,7 +125,7 @@ export function useDonorHeartbeat(
         setStatus('stopped');
         return;
       }
-      // Transient (offline / 5xx) — the next fix retries; native buffer holds
+      // Transient (offline / 5xx) - the next fix retries; native buffer holds
       // positions while the runtime is gone.
       errorReporter.warn('Heartbeat failed', {
         requestId,
@@ -145,7 +145,7 @@ export function useDonorHeartbeat(
     lastCoordsRef.current = null;
     let disposed = false;
     const bg = loadBgModule();
-    // EventSubscription | Location.LocationSubscription — both expose remove().
+    // EventSubscription | Location.LocationSubscription - both expose remove().
     let subscription: { remove: () => void } | null = null;
 
     const onFix = (c: HeartbeatCoords) => {
@@ -172,7 +172,7 @@ export function useDonorHeartbeat(
 
           await bg.start({
             accuracy: 'high',
-            distanceFilter: WATCH_DISTANCE_DELTA, // metres — granular enough for an ETA, gentle on battery
+            distanceFilter: WATCH_DISTANCE_DELTA, // metres - granular enough for an ETA, gentle on battery
             interval: WATCH_TIME_INTERVAL,
             stopOnTerminate: false,   // survive swipe-to-kill (the whole point)
             restartOnBoot: true,

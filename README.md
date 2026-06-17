@@ -34,9 +34,9 @@ A production-grade, real-time blood donation network. Recipients post requests i
 
 ## Why BludStack exists
 
-Every two seconds, someone somewhere needs blood. In emergencies, the bottleneck isn't supply — it's the **time it takes to find a compatible donor nearby**. Hospitals call relatives. Relatives forward WhatsApp messages. Messages spread to people who can't help. By the time a compatible donor sees the request, the window is closed.
+Every two seconds, someone somewhere needs blood. In emergencies, the bottleneck isn't supply - it's the **time it takes to find a compatible donor nearby**. Hospitals call relatives. Relatives forward WhatsApp messages. Messages spread to people who can't help. By the time a compatible donor sees the request, the window is closed.
 
-BludStack flips that. The moment a recipient pins their hospital, our backend expands outward in geo-fenced rings — **1 km → 5 km → 15 km → 30 km → 50 km → country-wide** — pushing real-time alerts only to **compatible, eligible, available donors** at each stage. When a donor accepts, the recipient sees their live GPS heartbeat on a map. Like Uber, but for the most important ride of someone's life.
+BludStack flips that. The moment a recipient pins their hospital, our backend expands outward in geo-fenced rings - **1 km → 5 km → 15 km → 30 km → 50 km → country-wide** - pushing real-time alerts only to **compatible, eligible, available donors** at each stage. When a donor accepts, the recipient sees their live GPS heartbeat on a map. Like Uber, but for the most important ride of someone's life.
 
 ---
 
@@ -70,18 +70,18 @@ BludStack flips that. The moment a recipient pins their hospital, our backend ex
 
 ## Highlights
 
-- **Real-time push escalation** — compatible donors in widening geo-rings are paged in priority order until someone accepts. No SMS fan-out, no group chats, no time wasted on incompatibles.
-- **Atomic accept + complete RPCs** — `accept_blood_request` and `complete_blood_donation` are `SECURITY DEFINER` PostgreSQL functions that enforce capacity, cooldown, age, and the N-donors rule in a single transaction. No race conditions, no double-accepts, no half-fulfilled state.
-- **Live donor heartbeat** — once a donor accepts, foreground GPS pushes their location to `/donations/heartbeat`. The recipient sees the donor moving on a map in real time, Uber-driver style.
-- **N units = N donors** — a 5-unit request needs 5 distinct donors to accept and complete. One donor per unit. No counterfeit fulfilment.
-- **Row-level security everywhere** — every table has RLS policies. Donors only see what they're allowed to see. Recipient phone numbers are never exposed until a donor commits.
-- **Killed-state notifications** — push notifications wake the app from any state on Android and iOS via `expo-notifications` with per-OEM tuning (see `PUSH_NOTIFICATIONS.md`).
-- **120 FPS target on low-end Android** — Reanimated v4 worklets, FlashList v2, memoized cells, expo-image with cache. Tested on Realme/Xiaomi mid-tier devices.
-- **Tri-state theme** — system / dark / light. Crimson on warm onyx (dark) or warm bone (light). All colors flow through theme tokens. Zero hardcoded hex outside `Colors.ts`.
-- **Skeleton loading only** — every loading state is a shimmer placeholder shaped like the content. No spinners, no `ActivityIndicator`, no jarring pop-ins.
-- **No emojis anywhere** — Ionicons + custom SVG (`BrandMark`) for every visual symbol. Period.
-- **No external error monitoring** — `errorReporter` is a typed logger wrapper. No Sentry, no Bugsnag, no Crashlytics. Crash logs stay on-device or in your own server logs.
-- **AsyncStorage everywhere** — never `react-native-mmkv`. Sensitive tokens go through `expo-secure-store`. Auth, query cache, KV all live in `@react-native-async-storage/async-storage`.
+- **Real-time push escalation** - compatible donors in widening geo-rings are paged in priority order until someone accepts. No SMS fan-out, no group chats, no time wasted on incompatibles.
+- **Atomic accept + complete RPCs** - `accept_blood_request` and `complete_blood_donation` are `SECURITY DEFINER` PostgreSQL functions that enforce capacity, cooldown, age, and the N-donors rule in a single transaction. No race conditions, no double-accepts, no half-fulfilled state.
+- **Live donor heartbeat** - once a donor accepts, foreground GPS pushes their location to `/donations/heartbeat`. The recipient sees the donor moving on a map in real time, Uber-driver style.
+- **N units = N donors** - a 5-unit request needs 5 distinct donors to accept and complete. One donor per unit. No counterfeit fulfilment.
+- **Row-level security everywhere** - every table has RLS policies. Donors only see what they're allowed to see. Recipient phone numbers are never exposed until a donor commits.
+- **Killed-state notifications** - push notifications wake the app from any state on Android and iOS via `expo-notifications` with per-OEM tuning (see `PUSH_NOTIFICATIONS.md`).
+- **120 FPS target on low-end Android** - Reanimated v4 worklets, FlashList v2, memoized cells, expo-image with cache. Tested on Realme/Xiaomi mid-tier devices.
+- **Tri-state theme** - system / dark / light. Crimson on warm onyx (dark) or warm bone (light). All colors flow through theme tokens. Zero hardcoded hex outside `Colors.ts`.
+- **Skeleton loading only** - every loading state is a shimmer placeholder shaped like the content. No spinners, no `ActivityIndicator`, no jarring pop-ins.
+- **No emojis anywhere** - Ionicons + custom SVG (`BrandMark`) for every visual symbol. Period.
+- **No external error monitoring** - `errorReporter` is a typed logger wrapper. No Sentry, no Bugsnag, no Crashlytics. Crash logs stay on-device or in your own server logs.
+- **AsyncStorage everywhere** - never `react-native-mmkv`. Sensitive tokens go through `expo-secure-store`. Auth, query cache, KV all live in `@react-native-async-storage/async-storage`.
 
 ---
 
@@ -130,10 +130,10 @@ flowchart LR
 
 ### Single-source-of-truth contracts
 
-- **`supabase_schema.sql`** — the only schema file. Tables, enums, RLS, RPCs, grants, realtime publication.
-- **`AuthContext`** — the only place the app reads `profile` from. Updates merge the server-returned row (the backend may normalise — e.g., role downgrade on age fail — so the server response is canonical).
-- **`ThemeContext`** — tri-state (system/dark/light) with `Appearance.addChangeListener` subscription + dark default fallback (Expo Go Android limitation workaround).
-- **`utils/api.ts`** — every HTTP call. Backend errors surface as typed `ApiError` discriminated by `isApiError`.
+- **`supabase_schema.sql`** - the only schema file. Tables, enums, RLS, RPCs, grants, realtime publication.
+- **`AuthContext`** - the only place the app reads `profile` from. Updates merge the server-returned row (the backend may normalise - e.g., role downgrade on age fail - so the server response is canonical).
+- **`ThemeContext`** - tri-state (system/dark/light) with `Appearance.addChangeListener` subscription + dark default fallback (Expo Go Android limitation workaround).
+- **`utils/api.ts`** - every HTTP call. Backend errors surface as typed `ApiError` discriminated by `isApiError`.
 
 ---
 
@@ -146,7 +146,7 @@ flowchart LR
 | Navigation | **Expo Router v6** | File-based, typed routes, group-aware guards via `<Stack.Protected>` semantics. |
 | State | **React Context** (Auth, Theme, Toast) | Three contexts for an app this size; deliberately not Zustand (see `REDESIGN_PLAN.md` §13). |
 | Server cache | **Direct fetch + Supabase Realtime** | Realtime is the cache-invalidation mechanism. TanStack Query intentionally not added. |
-| Animations | **Reanimated v4 worklets** | UI-thread 120 FPS target. Spring/timing/sequence/repeat — every interactive animation. |
+| Animations | **Reanimated v4 worklets** | UI-thread 120 FPS target. Spring/timing/sequence/repeat - every interactive animation. |
 | Lists | **`@shopify/flash-list` v2** | `maintainVisibleContentPosition.startRenderingFromBottom` for chat; recycler for feeds. |
 | Storage | **`@react-native-async-storage/async-storage`** + **`expo-secure-store`** | Never MMKV. Sensitive tokens go through SecureStore. |
 | Images | **`expo-image`** with cache policy | Disk + memory cache, modern formats, faster than RN's `Image`. |
@@ -170,14 +170,14 @@ BludStack/
 │   │   ├── (auth)/             # OTP sign-in (sheet UI + accent strip + handle)
 │   │   ├── onboarding.tsx      # Multi-step profile setup (sheet pattern)
 │   │   ├── (tabs)/
-│   │   │   ├── index.tsx           # Donor home — FlashList, memoized renderItem
-│   │   │   ├── request.tsx         # Recipient post-request — Uber DECIDE/VERIFY/ACT
-│   │   │   ├── donors.tsx          # Discovery — list + map toggle, filter chips
+│   │   │   ├── index.tsx           # Donor home - FlashList, memoized renderItem
+│   │   │   ├── request.tsx         # Recipient post-request - Uber DECIDE/VERIFY/ACT
+│   │   │   ├── donors.tsx          # Discovery - list + map toggle, filter chips
 │   │   │   ├── my-requests.tsx     # Recipient's own requests
 │   │   │   ├── history.tsx         # Donor donation timeline
 │   │   │   └── profile.tsx         # Profile + settings
-│   │   ├── request/[id].tsx    # Request detail — live donor heartbeat
-│   │   ├── donor/[id].tsx      # Donor detail — compatibility + contact pills
+│   │   ├── request/[id].tsx    # Request detail - live donor heartbeat
+│   │   ├── donor/[id].tsx      # Donor detail - compatibility + contact pills
 │   │   ├── map/live.tsx        # Live tracking map
 │   │   ├── chat.tsx            # Donor ↔ recipient chat (FlashList v2 inverted)
 │   │   └── profile/edit.tsx    # Edit profile modal
@@ -186,7 +186,7 @@ BludStack/
 │   ├── hooks/                  # Requests · location · notifications · heartbeat · chat
 │   ├── utils/                  # api.ts · supabase.ts · geo.ts · helpers.ts
 │   ├── constants/              # Colors · Typography · BloodData
-│   └── lib/errorReporter.ts    # Typed logger wrapper — NEVER Sentry
+│   └── lib/errorReporter.ts    # Typed logger wrapper - NEVER Sentry
 ├── backend/                    # Express on Vercel
 │   ├── src/
 │   │   ├── controllers/        # auth · profile · request · donation · chat · stats · admin
@@ -195,7 +195,7 @@ BludStack/
 │   │   ├── utils/supabaseAdmin.js   # service_role client
 │   │   └── server.js
 │   └── vercel.json             # Function + cron config
-├── supabase_schema.sql         # Single source of truth — tables, RLS, RPCs, grants
+├── supabase_schema.sql         # Single source of truth - tables, RLS, RPCs, grants
 ├── migrations/                 # Delta files for non-destructive Studio runs
 ├── verify_schema.sql           # Single-row PASS/FAIL diagnostic
 ├── PUSH_NOTIFICATIONS.md       # Killed-state delivery playbook
@@ -246,12 +246,12 @@ flowchart LR
 ```
 
 At each ring, the backend:
-1. Calls `nearby_compatible_donors(req_id, radius_km)` — a Postgres function that filters by compatibility matrix, eligibility (age, cooldown, availability), and `ST_DWithin` on the location.
+1. Calls `nearby_compatible_donors(req_id, radius_km)` - a Postgres function that filters by compatibility matrix, eligibility (age, cooldown, availability), and `ST_DWithin` on the location.
 2. Sends Expo Push to the cohort.
 3. Records ring + cohort size in `request_escalations` for the analytics + cron timing decisions.
 4. Holds the ring for the configured TTL or until N donors accept.
 
-The geo-fence claim is **DB-persisted with compare-and-set (CAS)** semantics — two cron invocations or two cohorts cannot double-page the same ring.
+The geo-fence claim is **DB-persisted with compare-and-set (CAS)** semantics - two cron invocations or two cohorts cannot double-page the same ring.
 
 ---
 
@@ -276,14 +276,14 @@ The geo-fence claim is **DB-persisted with compare-and-set (CAS)** semantics —
 
 The **`(tabs)/request.tsx`** screen is the locked design reference. Every other screen mirrors its pattern. The full spec lives in `REDESIGN_PLAN.md` §14, but the headline rules are:
 
-- **Sheet language** — bottom sheet ascends with `-Spacing[5]` overlap; brand accent strip (3 px crimson) + handle on top; spring entrance from `translateY 60`.
-- **Section labels** — uppercase, `FontWeight.black`, `LetterSpacing.widest`, `theme.textMuted`, indented `Spacing[2]`. Questions, not nouns.
-- **Inline CTA at form end** — summary row (colored dot + bold tier label + bullet-separated facts) + pill button + footer micro-copy (privacy/reassurance).
+- **Sheet language** - bottom sheet ascends with `-Spacing[5]` overlap; brand accent strip (3 px crimson) + handle on top; spring entrance from `translateY 60`.
+- **Section labels** - uppercase, `FontWeight.black`, `LetterSpacing.widest`, `theme.textMuted`, indented `Spacing[2]`. Questions, not nouns.
+- **Inline CTA at form end** - summary row (colored dot + bold tier label + bullet-separated facts) + pill button + footer micro-copy (privacy/reassurance).
 - **Breathing animation** on critical/destructive CTAs (1.00 ↔ 1.02, 1500 ms infinite). Loss aversion via motion.
-- **Haptics on every Pressable** — `Haptics.selectionAsync()` for toggles, `Haptics.impactAsync(Medium)` for commits.
-- **Theme tokens only** — `theme.primary`, `theme.success`, `theme.warning`, `theme.danger`, `theme.surface`, `theme.cardElevated`, `theme.background`, `theme.border`, `theme.borderStrong`, `theme.textPrimary`, `theme.textMuted`, `theme.textTertiary`, `theme.textOnPrimary`. Never hardcoded hex.
-- **Pill-shaped 2026 visual** — `Radius.pill` for actions and chips, `Radius.xl` for cards, `Radius['2xl']` for sheet tops.
-- **Skeleton loading only** — `Skeleton` shimmer matching content geometry. Never `ActivityIndicator`.
+- **Haptics on every Pressable** - `Haptics.selectionAsync()` for toggles, `Haptics.impactAsync(Medium)` for commits.
+- **Theme tokens only** - `theme.primary`, `theme.success`, `theme.warning`, `theme.danger`, `theme.surface`, `theme.cardElevated`, `theme.background`, `theme.border`, `theme.borderStrong`, `theme.textPrimary`, `theme.textMuted`, `theme.textTertiary`, `theme.textOnPrimary`. Never hardcoded hex.
+- **Pill-shaped 2026 visual** - `Radius.pill` for actions and chips, `Radius.xl` for cards, `Radius['2xl']` for sheet tops.
+- **Skeleton loading only** - `Skeleton` shimmer matching content geometry. Never `ActivityIndicator`.
 
 ---
 
@@ -302,10 +302,10 @@ The **`(tabs)/request.tsx`** screen is the locked design reference. Every other 
 
 ## Security model
 
-- **Row-level security** on every table. Service role is the only path to bypass — and it's only used inside SECURITY DEFINER RPCs and the backend `supabaseAdmin` client.
-- **Trigger guards** on `profiles` allow the service role to update server-managed fields (`total_donations`, `last_donation_date`, `is_verified`, `push_token`) while blocking client-side writes. The trigger checks `current_user`, `current_role`, and the JWT's `request.jwt.claim.role` OR'd together — robust across PostgREST configurations.
-- **Allowed-fields filter** in `profileController.js` — clients can only PATCH a whitelist. Server-managed fields are stripped server-side regardless of what the client sends.
-- **Atomic RPCs** for accept and complete — capacity, cooldown, age, and idempotency are checked inside the transaction. Failures roll back cleanly.
+- **Row-level security** on every table. Service role is the only path to bypass - and it's only used inside SECURITY DEFINER RPCs and the backend `supabaseAdmin` client.
+- **Trigger guards** on `profiles` allow the service role to update server-managed fields (`total_donations`, `last_donation_date`, `is_verified`, `push_token`) while blocking client-side writes. The trigger checks `current_user`, `current_role`, and the JWT's `request.jwt.claim.role` OR'd together - robust across PostgREST configurations.
+- **Allowed-fields filter** in `profileController.js` - clients can only PATCH a whitelist. Server-managed fields are stripped server-side regardless of what the client sends.
+- **Atomic RPCs** for accept and complete - capacity, cooldown, age, and idempotency are checked inside the transaction. Failures roll back cleanly.
 - **JWT bearer auth** on every API endpoint. The backend reads `Authorization: Bearer <token>` and verifies against Supabase Auth before any work.
 - **No service-role key in the client.** The mobile app only knows the anon key. Service-role lives in `backend/.env` and Vercel env vars.
 - **OTP rate-limiting** via Supabase Auth defaults. No client-side bypass.
@@ -380,7 +380,7 @@ npx eas build --profile production --platform all
 | `SUPABASE_DB_URL` | Project Settings → Database → Connection string (used for psql) |
 | `JWT_SECRET` | Same value as Supabase JWT secret |
 | `EXPO_ACCESS_TOKEN` | Expo dashboard → Access Tokens (for push) |
-| `INTERNAL_CRON_TOKEN` | Random secret — used by Vercel Cron to call `/internal/*` |
+| `INTERNAL_CRON_TOKEN` | Random secret - used by Vercel Cron to call `/internal/*` |
 | `DEBUG_ERRORS` | `1` to surface pg codes in error responses; `0` in prod |
 
 ### Mobile (`mobile/.env`)
@@ -420,9 +420,9 @@ Each cron handler authenticates with `INTERNAL_CRON_TOKEN` before doing work.
 Killed-state delivery is the most important reliability axis. The full playbook is in **`PUSH_NOTIFICATIONS.md`**, including per-OEM tuning (Xiaomi, OnePlus, Realme, Samsung battery saver / auto-launch / lock-screen permissions).
 
 Critical-channel highlights:
-- **Android** — dedicated `critical` channel with bypass-DnD, alarm sound, max importance. The app registers it at startup.
-- **iOS** — `critical-alert` entitlement requested at first run.
-- **Tap deep-linking** — `useNotificationDeepLinks` reads `Notifications.useLastNotificationResponse()` in `_layout.tsx` and routes to the right screen even from a cold launch.
+- **Android** - dedicated `critical` channel with bypass-DnD, alarm sound, max importance. The app registers it at startup.
+- **iOS** - `critical-alert` entitlement requested at first run.
+- **Tap deep-linking** - `useNotificationDeepLinks` reads `Notifications.useLastNotificationResponse()` in `_layout.tsx` and routes to the right screen even from a cold launch.
 
 ---
 
@@ -437,13 +437,13 @@ Base URL: `https://<your-vercel-url>` (or `http://localhost:3000` in dev). Every
 | `GET`  | `/profiles/nearby-donors` | `?lat&lon&radiusKm&bloodGroup` | `Donor[]` |
 | `POST` | `/requests` | `CreateRequestPayload` | `BloodRequest` |
 | `GET`  | `/requests/nearby` | `?lat&lon` | `BloodRequest[]` (excludes own) |
-| `GET`  | `/requests/mine` | — | `BloodRequest[]` |
-| `POST` | `/requests/:id/cancel` | — | `BloodRequest` |
+| `GET`  | `/requests/mine` | - | `BloodRequest[]` |
+| `POST` | `/requests/:id/cancel` | - | `BloodRequest` |
 | `POST` | `/donations/accept` | `{ requestId }` | `RequestResponse` |
 | `POST` | `/donations/decline`| `{ requestId }` | `RequestResponse` |
 | `POST` | `/donations/complete`| `{ requestId, donorId }` | `BloodRequest` (status → `fulfilled` when all units complete) |
 | `POST` | `/donations/heartbeat` | `{ requestId, lat, lon }` | `204` |
-| `GET`  | `/stats/me` | — | `{ donations, livesHelped, lastDonatedAt }` |
+| `GET`  | `/stats/me` | - | `{ donations, livesHelped, lastDonatedAt }` |
 | `GET`  | `/chat/:requestId/messages` | `?before&limit` | `ChatMessage[]` |
 | `POST` | `/chat/:requestId/messages` | `{ clientId, receiverId, body }` | `ChatMessage` |
 
@@ -464,7 +464,7 @@ The canonical schema is **`supabase_schema.sql`** at the repo root. Top-level ta
 | `chat_messages` | Donor ↔ recipient thread scoped to `request_id`; idempotent on `client_id` |
 | `push_tokens` | Per-device Expo push tokens |
 
-All tables have RLS policies. The full DDL is generated and version-controlled — drop the file into Supabase Studio's SQL Editor to reset a project.
+All tables have RLS policies. The full DDL is generated and version-controlled - drop the file into Supabase Studio's SQL Editor to reset a project.
 
 ---
 
@@ -474,7 +474,7 @@ All tables have RLS policies. The full DDL is generated and version-controlled �
 - [ ] In-app video consult for critical cases (E2EE via the noble crypto stack)
 - [ ] Donor badges + leaderboards (city-anonymised)
 - [ ] Web companion (Next.js) for hospitals to post on behalf of patients
-- [ ] Multilingual UI (Urdu, Hindi, Arabic, Spanish — full RTL where applicable)
+- [ ] Multilingual UI (Urdu, Hindi, Arabic, Spanish - full RTL where applicable)
 - [ ] Donor-recipient chat with images + voice notes (`expo-audio`, not `expo-av`)
 - [ ] Apple Vision Pro spatial map view for blood banks (experimental)
 
@@ -489,7 +489,7 @@ Yes. Every table has row-level security. Recipient phone numbers are never visib
 The geo-fence keeps expanding to country-wide. The request stays active until you cancel it or all units are fulfilled. You can repost at any time.
 
 **Can I be both a donor and a recipient?**
-Yes — pick "Both" at onboarding. The role gates which tabs you see; "Both" sees everything.
+Yes - pick "Both" at onboarding. The role gates which tabs you see; "Both" sees everything.
 
 **How is donor eligibility enforced?**
 Age (≥ 18) is server-enforced. The 90-day cooldown is enforced by the `accept_blood_request` RPC. Availability is a profile toggle.
@@ -516,22 +516,22 @@ The mobile app only talks to two surfaces: Supabase (RT + Auth + DB) and the Exp
 
 ## Contributing
 
-Pull requests are welcome. The bar is high — but the door is open.
+Pull requests are welcome. The bar is high - but the door is open.
 
 ### Ground rules
 
 1. **One branch per change.** Branch names are kebab-case with a prefix: `feat/`, `fix/`, `chore/`, `docs/`, `refactor/`. Date suffix optional.
 2. **No emojis** in code, copy, or commit messages.
-3. **No `Alert.alert`** for errors — use the `useToast` context.
-4. **No `ActivityIndicator`** — use `Skeleton` shaped like the content.
+3. **No `Alert.alert`** for errors - use the `useToast` context.
+4. **No `ActivityIndicator`** - use `Skeleton` shaped like the content.
 5. **No hardcoded hex** outside `Colors.ts`. Everything flows through `theme.*` tokens.
 6. **No `react-native-mmkv`.** All persistence is AsyncStorage or `expo-secure-store`.
 7. **No external error monitoring SDKs.**
-8. **Strict TypeScript** — no `any` in new code. Use the SDK's generated types.
+8. **Strict TypeScript** - no `any` in new code. Use the SDK's generated types.
 9. **Memoize list cells.** `React.memo`, stable `keyExtractor`, `getItemType` for FlashList.
 10. **Haptic on every interactive `Pressable`.** Selection for toggles, impact for commits.
 11. **Skeleton loading only.** Never spinners.
-12. **`npx expo install <pkg>`** — never edit `package.json` versions by hand.
+12. **`npx expo install <pkg>`** - never edit `package.json` versions by hand.
 
 ### Local development
 
@@ -542,7 +542,7 @@ cd backend && npm run dev   # nodemon + tsx if added
 # Mobile (Expo Go for fast iteration)
 cd mobile && npx expo start
 
-# Mobile (dev build — required for push notifications)
+# Mobile (dev build - required for push notifications)
 cd mobile && npx eas build --profile development --platform android
 ```
 

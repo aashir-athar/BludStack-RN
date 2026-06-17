@@ -12,7 +12,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 }
 
 /**
- * Admin client — bypasses RLS.
+ * Admin client - bypasses RLS.
  * Use ONLY on the backend, never expose service role key to clients.
  */
 const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {

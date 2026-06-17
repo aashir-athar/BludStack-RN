@@ -1,5 +1,5 @@
 // ui/Text.tsx
-// Typed text primitive built on Tamagui — role + tone variants mirror the
+// Typed text primitive built on Tamagui - role + tone variants mirror the
 // Typography `Type` scale. Colours are theme tokens ($textPrimary, $primary…)
 // so they switch with the active Tamagui theme. `Heading` is a display alias.
 import type { ComponentProps } from 'react';

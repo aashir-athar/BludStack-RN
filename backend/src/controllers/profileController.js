@@ -6,7 +6,7 @@ const { success, error } = require('../utils/response');
 
 /**
  * GET /api/v1/profiles/:id
- * Public profile view — respects share_medical_history flag.
+ * Public profile view - respects share_medical_history flag.
  */
 async function getProfile(req, res, next) {
   try {
@@ -84,7 +84,7 @@ async function updateMyProfile(req, res, next) {
         const ageYears = ageMs / (365.25 * 86_400_000);
         // Donor eligibility window: 18-65 inclusive (WHO standard).
         if (ageYears < 18 || ageYears > 65) {
-          return error(res, 'Donor role requires age 18–65', 400);
+          return error(res, 'Donor role requires age 18-65', 400);
         }
       }
       updates.role = req.body.role;
@@ -173,7 +173,7 @@ async function getNearbyDonors(req, res, next) {
 
     const nearby = filterByRadius(data ?? [], lat, lon, radiusKm);
 
-    // Never leak exact coordinates — return distance only
+    // Never leak exact coordinates - return distance only
     const sanitised = nearby.map(({ latitude, longitude, distanceKm, ...rest }) => ({
       ...rest,
       distanceKm: Math.round(distanceKm * 10) / 10,

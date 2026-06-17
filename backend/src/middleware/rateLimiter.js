@@ -13,7 +13,7 @@ const WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10); //
 const MAX       = parseInt(process.env.RATE_LIMIT_MAX       || '100',    10);
 
 /**
- * Global rate limiter — 100 req / 15 min per IP by default.
+ * Global rate limiter - 100 req / 15 min per IP by default.
  */
 const globalRateLimiter = rateLimit({
   windowMs: WINDOW_MS,
@@ -45,7 +45,7 @@ const authRateLimiter = rateLimit({
 });
 
 /**
- * Notification sender limiter — prevent spam.
+ * Notification sender limiter - prevent spam.
  * 20 notification triggers per 5 minutes per user.
  */
 const notifRateLimiter = rateLimit({
@@ -62,7 +62,7 @@ const notifRateLimiter = rateLimit({
 });
 
 /**
- * Live-location heartbeat limiter — the donor app pushes GPS roughly once every
+ * Live-location heartbeat limiter - the donor app pushes GPS roughly once every
  * 15-30s while en-route, so ~2-4 req/min is normal. Cap at 40/min per donor to
  * absorb bursts and movement-triggered pushes while blocking a runaway client
  * or a malicious flood. Keyed by donor id (one active commitment at a time).

@@ -66,7 +66,7 @@ async function listRequests(req, res, next) {
     const limit      = Math.min(50, parseInt(req.query.limit ?? '20', 10));
     const hasGeo     = !isNaN(lat) && !isNaN(lon);
 
-    // Shared base query. Exclude the caller's own posted requests — they aren't
+    // Shared base query. Exclude the caller's own posted requests - they aren't
     // a donor for themselves (belt-and-suspenders with mobile-side filtering).
     const buildBase = () => {
       let q = supabaseAdmin
@@ -87,7 +87,7 @@ async function listRequests(req, res, next) {
 
     if (hasGeo) {
       // Radius filtering is done in JS (PostGIS-free), so DB-level range
-      // pagination would count + page rows the radius filter later drops —
+      // pagination would count + page rows the radius filter later drops -
       // yielding a wrong `total` and mis-ordered pages. Instead scan a bounded
       // window of active requests, filter + distance-sort, then paginate in
       // memory. `scanCapped` is surfaced honestly rather than silently

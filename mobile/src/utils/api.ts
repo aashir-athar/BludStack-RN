@@ -77,7 +77,7 @@ async function request<T>(
   }
 
   // Backend wraps successful responses as { success: true, data, message }.
-  // Some endpoints return data directly — handle both.
+  // Some endpoints return data directly - handle both.
   return (json?.data ?? json) as T;
 }
 

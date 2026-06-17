@@ -35,7 +35,7 @@ async function getCommunityStats(req, res, next) {
       0
     );
 
-    // activeJobCount is async (DB-backed) — await it so we don't ship a
+    // activeJobCount is async (DB-backed) - await it so we don't ship a
     // serialized Promise as the field value. On failure return null (not 0):
     // 0 would falsely read as "no fences running" when the DB is actually down.
     const activeJobs = await activeJobCount().catch(() => null);
@@ -76,7 +76,7 @@ async function getLeaderboard(req, res, next) {
 
 /**
  * GET /api/v1/stats/blood-availability
- * Count of available donors per blood group — useful for scarcity display.
+ * Count of available donors per blood group - useful for scarcity display.
  */
 async function getBloodAvailability(req, res, next) {
   try {

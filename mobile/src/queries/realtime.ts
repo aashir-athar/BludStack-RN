@@ -40,7 +40,7 @@ export function useRealtimeBridge() {
 }
 
 /**
- * Focused per-request realtime — keeps a single request's detail (and its
+ * Focused per-request realtime - keeps a single request's detail (and its
  * response list) fresh while that screen is mounted.
  */
 export function useRequestRealtime(requestId: string | undefined) {

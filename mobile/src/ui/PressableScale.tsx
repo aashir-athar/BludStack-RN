@@ -1,5 +1,5 @@
 // ui/PressableScale.tsx
-// Tactile press wrapper — scales down on press (Reanimated v4 worklet, UI thread)
+// Tactile press wrapper - scales down on press (Reanimated v4 worklet, UI thread)
 // with optional selection haptic. The base interaction primitive for cards/rows.
 import React from 'react';
 import { Pressable, type PressableProps, type StyleProp, type ViewStyle } from 'react-native';

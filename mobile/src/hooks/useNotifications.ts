@@ -1,6 +1,6 @@
 // hooks/useNotifications.ts
 // ─────────────────────────────────────────────────────────────────────────────
-// After RLS, mobile cannot UPDATE its own profiles.push_token directly — that
+// After RLS, mobile cannot UPDATE its own profiles.push_token directly - that
 // column is server-managed. Tokens are registered via PUT /notifications/token,
 // so the app never reads or writes any user's push_token against Supabase.
 //
@@ -16,7 +16,7 @@ import { useAuth } from '@/stores/authStore';
 import { apiRegisterPushToken } from '@/utils/api';
 import { errorReporter } from '@/lib/errorReporter';
 
-// Foreground handler — show the banner + play sound even when the app is open,
+// Foreground handler - show the banner + play sound even when the app is open,
 // so a donor reading the feed still sees an incoming critical request.
 // `shouldShowBanner` / `shouldShowList` are the SDK 54+ split of the legacy
 // `shouldShowAlert`.
@@ -51,7 +51,7 @@ export function useNotifications() {
       if (finalStatus !== 'granted') return;
 
       // 2. Android channels. `emergency` MUST be MAX importance with bypassDnd so
-      // a life-critical alert rings even in silent mode / Do Not Disturb —
+      // a life-critical alert rings even in silent mode / Do Not Disturb -
       // matching the iOS time-sensitive escalation the backend sends. `default`
       // is HIGH (heads-up, respects DND).
       if (Platform.OS === 'android') {
@@ -78,7 +78,7 @@ export function useNotifications() {
         });
       }
 
-      // 3. Push token (Expo Go without an EAS projectId fails — expected, skip).
+      // 3. Push token (Expo Go without an EAS projectId fails - expected, skip).
       const projectId = getProjectId();
       let pushToken: string;
       try {

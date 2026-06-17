@@ -3,10 +3,10 @@
 // The live map closes the loop between a donor who said "I'm coming" and a
 // recipient counting the minutes. Two roles share one screen:
 //
-//   • donor     — useDonorHeartbeat streams their position to the backend
+//   • donor     - useDonorHeartbeat streams their position to the backend
 //                 (persistent foreground service, survives swipe-to-kill), and
 //                 a dashed route line points them at the hospital.
-//   • recipient — subscribes to realtime UPDATEs on request_responses and
+//   • recipient - subscribes to realtime UPDATEs on request_responses and
 //                 watches each accepted donor's pin move in real time.
 //
 // Lever: goal gradient. A visibly shrinking distance and a moving dot make the
@@ -118,7 +118,7 @@ export default function LiveMapScreen() {
       donor_lat: number | null;
       donor_lon: number | null;
       // PostgREST returns an embedded one-to-one relation as an object, but the
-      // generated type widens it to an array — normalise both shapes.
+      // generated type widens it to an array - normalise both shapes.
       donor: { id: string; full_name: string; blood_group: string } | { id: string; full_name: string; blood_group: string }[] | null;
     };
     const pins: DonorPin[] = ((data ?? []) as unknown as Row[])
@@ -321,7 +321,7 @@ export default function LiveMapScreen() {
   );
 }
 
-// A soft pulsing dot — the universal "this is live" tell. Honors reduced motion
+// A soft pulsing dot - the universal "this is live" tell. Honors reduced motion
 // by holding a steady dot instead of animating.
 function LiveDot({ color, active }: { color: string; active: boolean }) {
   const reduced = useReducedMotion();

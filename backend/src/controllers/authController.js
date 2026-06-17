@@ -18,7 +18,7 @@ function computeAge(dobISO) {
 }
 
 /**
- * GET /api/v1/auth/me — returns the authenticated user's profile.
+ * GET /api/v1/auth/me - returns the authenticated user's profile.
  */
 async function getMe(req, res, next) {
   try {
@@ -43,7 +43,7 @@ async function getMe(req, res, next) {
  * POST /api/v1/auth/register
  *
  * Called after first OTP verification to populate the profile row created by
- * the `on_auth_user_created` trigger. Idempotent — re-running just updates
+ * the `on_auth_user_created` trigger. Idempotent - re-running just updates
  * the same row.
  *
  * Server-enforced rules (mirrored in supabase_schema.sql constraints):
@@ -51,7 +51,7 @@ async function getMe(req, res, next) {
  *     requires age 18+. Under-18 users are silently downgraded to 'recipient'
  *     and the response includes a notice.
  *   • Push token, total_donations, last_donation_date, is_verified are never
- *     accepted from this payload — they are server-managed.
+ *     accepted from this payload - they are server-managed.
  */
 async function register(req, res, next) {
   try {
@@ -78,7 +78,7 @@ async function register(req, res, next) {
       }
       // Donor eligibility window: 18-65 (WHO + most national blood-bank
       // guidelines). Outside this window, downgrade silently to recipient
-      // — the caller gets `downgraded: true` and can surface a toast.
+      // - the caller gets `downgraded: true` and can surface a toast.
       if (age < 18 || age > 65) {
         role = 'recipient';
         downgraded = true;
@@ -114,7 +114,7 @@ async function register(req, res, next) {
       res,
       { profile: data, downgraded },
       downgraded
-        ? 'Profile created. Donor role requires age 18–65; account set up as recipient.'
+        ? 'Profile created. Donor role requires age 18-65; account set up as recipient.'
         : 'Profile created',
       201,
     );
@@ -127,7 +127,7 @@ async function register(req, res, next) {
  * POST /api/v1/auth/logout
  *
  * Clears the device's push token so the user stops receiving notifications.
- * Supabase JWTs are stateless — the client must drop the access token locally.
+ * Supabase JWTs are stateless - the client must drop the access token locally.
  */
 async function logout(req, res, next) {
   try {

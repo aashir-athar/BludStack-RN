@@ -1,6 +1,6 @@
 // Jest config for the BludStack mobile app.
-// The suite targets pure logic — the blood-compatibility matrix, geo math, and
-// zod schemas — the rules that must never silently drift. These modules have no
+// The suite targets pure logic - the blood-compatibility matrix, geo math, and
+// zod schemas - the rules that must never silently drift. These modules have no
 // React Native or Expo-module dependencies, so we skip the heavyweight jest-expo
 // RN preset and transform with a minimal Babel pipeline (strip TS types, ESM ->
 // CJS) in a node environment. moduleNameMapper mirrors the `@/*` alias; zod

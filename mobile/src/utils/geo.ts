@@ -65,7 +65,7 @@ export function detectCountryCode(lat: number, lon: number): string | undefined 
  */
 export function isInCountry(lat: number, lon: number, countryCode: string): boolean {
   const box = COUNTRY_BOUNDS[countryCode];
-  if (!box) return true; // unknown country — don't block
+  if (!box) return true; // unknown country - don't block
   return (
     lat >= box.latMin && lat <= box.latMax &&
     lon >= box.lonMin && lon <= box.lonMax
@@ -74,14 +74,14 @@ export function isInCountry(lat: number, lon: number, countryCode: string): bool
 
 /**
  * Filter donors to those inside a country bounding box.
- * Used when geo-fence expands past 50 km — prevents cross-border matches.
+ * Used when geo-fence expands past 50 km - prevents cross-border matches.
  */
 export function filterDonorsByCountry<T extends { latitude: number; longitude: number }>(
   donors: T[],
   countryCode: string,
 ): T[] {
   const box = COUNTRY_BOUNDS[countryCode];
-  if (!box) return donors; // no box known — return all
+  if (!box) return donors; // no box known - return all
   return donors.filter(d =>
     d.latitude  >= box.latMin && d.latitude  <= box.latMax &&
     d.longitude >= box.lonMin && d.longitude <= box.lonMax

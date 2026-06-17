@@ -1,5 +1,5 @@
 // stores/authStore.ts
-// Identity + session as a Zustand store — replaces AuthContext. Holds the
+// Identity + session as a Zustand store - replaces AuthContext. Holds the
 // Supabase session and the user's own profile, validates a cached session
 // against the server on boot, and keeps the profile live via a realtime channel.
 // Server data (requests, donations, stats) lives in TanStack Query, not here.
@@ -158,7 +158,7 @@ export function initAuth(): () => void {
       return;
     }
 
-    // Validate the cached session against the server — a stale/expired token or
+    // Validate the cached session against the server - a stale/expired token or
     // a switched Supabase project must be signed out before any redirect runs.
     const { data: userCheck, error: userErr } = await supabase.auth.getUser();
     if (cancelled) return;

@@ -75,7 +75,7 @@ async function sendTestNotification(req, res, next) {
     const result = await sendPushNotifications([{
       token:     profile.push_token,
       title:     'BludStack test notification',
-      body:      `Hi ${profile.full_name} — push notifications are working.`,
+      body:      `Hi ${profile.full_name} - push notifications are working.`,
       data:      { type: 'TEST' },
       channelId: 'default',
     }]);
