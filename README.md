@@ -8,12 +8,12 @@ A production-grade, real-time blood donation network. Recipients post requests i
 
 <br />
 
-![Expo SDK](https://img.shields.io/badge/Expo%20SDK-54-000020?logo=expo&logoColor=fff&style=for-the-badge)
-![React Native](https://img.shields.io/badge/React%20Native-0.81-61DAFB?logo=react&logoColor=000&style=for-the-badge)
+![Expo SDK](https://img.shields.io/badge/Expo%20SDK-56-000020?logo=expo&logoColor=fff&style=for-the-badge)
+![React Native](https://img.shields.io/badge/React%20Native-0.85-61DAFB?logo=react&logoColor=000&style=for-the-badge)
 ![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6?logo=typescript&logoColor=fff&style=for-the-badge)
 ![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20Realtime%20%2B%20RLS-3ECF8E?logo=supabase&logoColor=fff&style=for-the-badge)
 ![Node](https://img.shields.io/badge/Node-20.x-339933?logo=node.js&logoColor=fff&style=for-the-badge)
-![Vercel](https://img.shields.io/badge/Vercel-Serverless-000?logo=vercel&logoColor=fff&style=for-the-badge)
+![Express](https://img.shields.io/badge/Express-5-000?logo=express&logoColor=fff&style=for-the-badge)
 
 <br />
 
@@ -89,9 +89,10 @@ BludStack flips that. The moment a recipient pins their hospital, our backend ex
 
 ```mermaid
 flowchart LR
-  subgraph Mobile["React Native / Expo SDK 54"]
-    UI["Screens · Reanimated v4 · FlashList v2"]
-    AuthCtx["AuthContext · ThemeContext · ToastContext"]
+  subgraph Mobile["React Native / Expo SDK 56"]
+    UI["Screens · Tamagui · Reanimated v4 · FlashList v2"]
+    Stores["Zustand: authStore · themeStore · toastStore"]
+    Query["TanStack Query + realtime bridge"]
     APIClient["utils/api.ts"]
     SBClient["@supabase/supabase-js"]
     Notif["expo-notifications"]
@@ -114,7 +115,8 @@ flowchart LR
     FCM["FCM"]
   end
 
-  UI --> AuthCtx --> APIClient
+  UI --> Stores
+  UI --> Query --> APIClient
   UI --> SBClient
   APIClient -- "HTTPS · Bearer token" --> API
   SBClient -- "Realtime WS" --> RT
@@ -131,9 +133,10 @@ flowchart LR
 ### Single-source-of-truth contracts
 
 - **`supabase_schema.sql`** - the only schema file. Tables, enums, RLS, RPCs, grants, realtime publication.
-- **`AuthContext`** - the only place the app reads `profile` from. Updates merge the server-returned row (the backend may normalise - e.g., role downgrade on age fail - so the server response is canonical).
-- **`ThemeContext`** - tri-state (system/dark/light) with `Appearance.addChangeListener` subscription + dark default fallback (Expo Go Android limitation workaround).
-- **`utils/api.ts`** - every HTTP call. Backend errors surface as typed `ApiError` discriminated by `isApiError`.
+- **`authStore`** (Zustand) - the only place the app reads `profile` from. `updateProfile` merges the server-returned row (the backend may normalise - e.g., role downgrade on age fail - so the server response is canonical). `initAuth()` runs once in the root.
+- **`themeStore`** (Zustand) - tri-state (system/dark/light) with an `Appearance` subscription + AsyncStorage persistence; `useAppTheme()` resolves the active token set.
+- **`queries/*`** (TanStack Query) - every read is a typed hook; a Supabase Realtime -> `invalidateQueries` bridge keeps the cache fresh without manual refetching.
+- **`utils/api.ts`** - every HTTP call. Backend errors surface as a typed `ApiError` discriminated by `isApiError`.
 
 ---
 
@@ -141,21 +144,24 @@ flowchart LR
 
 | Layer | Choice | Why |
 |---|---|---|
-| Mobile framework | **Expo SDK 54** + RN 0.81.5 + React 19.1 | New Architecture default, first-class Reanimated v4, FlashList v2, `expo-glass-effect`. |
-| Language | **TypeScript (strict)** | Catches every shape mismatch at compile time. |
-| Navigation | **Expo Router v6** | File-based, typed routes, group-aware guards via `<Stack.Protected>` semantics. |
-| State | **React Context** (Auth, Theme, Toast) | Three contexts for an app this size; deliberately not Zustand (see `REDESIGN_PLAN.md` §13). |
-| Server cache | **Direct fetch + Supabase Realtime** | Realtime is the cache-invalidation mechanism. TanStack Query intentionally not added. |
-| Animations | **Reanimated v4 worklets** | UI-thread 120 FPS target. Spring/timing/sequence/repeat - every interactive animation. |
+| Mobile framework | **Expo SDK 56** + RN 0.85.3 + React 19.2 | New Architecture + React Compiler on. First-class Reanimated v4, FlashList v2, NativeTabs. |
+| Language | **TypeScript (strict)** | No `any`, no `@ts-ignore`. Catches every shape mismatch at compile time. |
+| Navigation | **Expo Router v6** (`src/app/`) | File-based, typed routes. Role-aware `NativeTabs` from `expo-router/unstable-native-tabs`. |
+| UI system | **Tamagui** (`styled()` + tokens) | The whole atomic library (`src/ui/`) is theme-token-driven; one accent, one gray family, 8pt grid. |
+| Global state | **Zustand** (`subscribeWithSelector`) | Three stores (`authStore`, `themeStore`, `toastStore`) with separated State/Actions interfaces. |
+| Server cache | **TanStack Query** + realtime bridge | Query/mutation hooks over `utils/api.ts`; Supabase Realtime drives `invalidateQueries`. |
+| Forms | **react-hook-form + zod** | `zodResolver` over schemas in `src/schemas/`; the donor 18-65 age gate mirrors the server. |
+| Animations | **Reanimated v4 worklets** | UI-thread animations, every one honouring `useReducedMotion`. |
 | Lists | **`@shopify/flash-list` v2** | `maintainVisibleContentPosition.startRenderingFromBottom` for chat; recycler for feeds. |
 | Storage | **`@react-native-async-storage/async-storage`** + **`expo-secure-store`** | Never MMKV. Sensitive tokens go through SecureStore. |
 | Images | **`expo-image`** with cache policy | Disk + memory cache, modern formats, faster than RN's `Image`. |
-| Maps | **`react-native-maps`** | Default provider with theme switching. |
-| Backend | **Node 20 + Express** on **Vercel Serverless** | Stateless functions, free tier-friendly, sub-100 ms cold starts in regions. |
+| Maps | **`@maplibre/maplibre-react-native`** + OSM / CARTO tiles | Free, no API key, no Google dependency. Light = OSM, dark = CARTO Dark Matter. |
+| Live location | **`expo-persistent-background-location`** | `location` foreground service that survives swipe-to-kill; expo-location fallback in Expo Go. |
+| Backend | **Node 20 + Express 5** (Railway / Vercel) | Stateless API; Vercel Cron or a node-cron worker drives geo-fence escalation. |
 | Database | **Supabase Postgres** with RLS | Realtime subscriptions on `postgres_changes`. Atomic RPCs for accept/complete. |
 | Auth | **Supabase Auth · email OTP** | No passwords. 6-digit code per session. |
 | Notifications | **`expo-notifications`** + Expo Push API | Killed-state delivery; per-OEM channels for Android (see `PUSH_NOTIFICATIONS.md`). |
-| Geo | **Haversine + `deltaFromKm`** + reverse-geocode via `expo-location` | All radius math in-app; reverse geocode hits the OS. |
+| Geo | **Haversine** + reverse-geocode via `expo-location` | All radius math in-app; reverse geocode hits the OS. |
 
 ---
 
@@ -163,44 +169,53 @@ flowchart LR
 
 ```
 BludStack/
-├── mobile/                     # Expo SDK 54 app
-│   ├── app/
-│   │   ├── _layout.tsx         # ErrorBoundary > GH > KeyboardProvider > SafeArea > Theme > Auth > Toast > RootNavigator
-│   │   ├── index.tsx           # Cold-start gate (<Redirect>)
-│   │   ├── (auth)/             # OTP sign-in (sheet UI + accent strip + handle)
-│   │   ├── onboarding.tsx      # Multi-step profile setup (sheet pattern)
-│   │   ├── (tabs)/
-│   │   │   ├── index.tsx           # Donor home - FlashList, memoized renderItem
-│   │   │   ├── request.tsx         # Recipient post-request - Uber DECIDE/VERIFY/ACT
-│   │   │   ├── donors.tsx          # Discovery - list + map toggle, filter chips
-│   │   │   ├── my-requests.tsx     # Recipient's own requests
-│   │   │   ├── history.tsx         # Donor donation timeline
-│   │   │   └── profile.tsx         # Profile + settings
-│   │   ├── request/[id].tsx    # Request detail - live donor heartbeat
-│   │   ├── donor/[id].tsx      # Donor detail - compatibility + contact pills
-│   │   ├── map/live.tsx        # Live tracking map
-│   │   ├── chat.tsx            # Donor ↔ recipient chat (FlashList v2 inverted)
-│   │   └── profile/edit.tsx    # Edit profile modal
-│   ├── components/             # Theme-tokenised primitives
-│   ├── contexts/               # Auth · Theme · Toast
-│   ├── hooks/                  # Requests · location · notifications · heartbeat · chat
-│   ├── utils/                  # api.ts · supabase.ts · geo.ts · helpers.ts
-│   ├── constants/              # Colors · Typography · BloodData
-│   └── lib/errorReporter.ts    # Typed logger wrapper - NEVER Sentry
-├── backend/                    # Express on Vercel
+├── mobile/                     # Expo SDK 56 app (source under src/)
 │   ├── src/
-│   │   ├── controllers/        # auth · profile · request · donation · chat · stats · admin
-│   │   ├── middleware/         # auth · errorHandler · validator
+│   │   ├── app/                    # Expo Router routes
+│   │   │   ├── _layout.tsx         # ErrorBoundary > GestureHandler > Keyboard > SafeArea > Query > Tamagui > RootNavigator
+│   │   │   ├── index.tsx           # Cold-start gate (role-aware redirect)
+│   │   │   ├── (auth)/index.tsx    # Email OTP sign-in
+│   │   │   ├── onboarding.tsx      # Multi-step RHF + zod profile setup
+│   │   │   ├── (tabs)/
+│   │   │   │   ├── _layout.tsx          # Role-aware NativeTabs
+│   │   │   │   ├── index.tsx            # Donor home - compatible-requests feed
+│   │   │   │   ├── request.tsx          # Recipient post-request (north-star)
+│   │   │   │   ├── donors.tsx           # Discovery feed
+│   │   │   │   ├── my-requests.tsx      # Recipient's own requests
+│   │   │   │   ├── history.tsx          # Donor donation timeline
+│   │   │   │   └── profile.tsx          # Profile + settings
+│   │   │   ├── request/[id].tsx    # Request detail - role-aware actions
+│   │   │   ├── donor/[id].tsx      # Donor detail - compatibility + contact
+│   │   │   ├── map/live.tsx        # Live tracking map (MapLibre + heartbeat)
+│   │   │   ├── chat.tsx            # Donor / recipient chat (FlashList v2)
+│   │   │   └── profile/edit.tsx    # Edit profile modal
+│   │   ├── ui/                     # Tamagui atomic + composite library
+│   │   ├── stores/                 # Zustand: authStore · themeStore · toastStore
+│   │   ├── queries/                # TanStack Query hooks + realtime bridge
+│   │   ├── schemas/                # zod schemas (auth, onboarding, request)
+│   │   ├── hooks/                  # location · notifications · donorHeartbeat · chat
+│   │   ├── utils/                  # api.ts · supabase.ts · geo.ts · mapStyles.ts
+│   │   ├── constants/              # Colors · Typography · BloodData
+│   │   └── lib/errorReporter.ts    # Typed logger wrapper - NEVER Sentry
+│   ├── tamagui.config.ts           # Palette, tokens, light/dark themes
+│   └── __tests__ (src/__tests__)   # Jest: blood-compat · geo · zod schemas
+├── backend/                    # Express 5 (Railway / Vercel)
+│   ├── src/
+│   │   ├── controllers/        # auth · profile · request · donation · notification · stats
+│   │   ├── middleware/         # auth · errorHandler · rateLimiter · validate
 │   │   ├── routes/             # Express routers per resource
+│   │   ├── services/           # cron · geoFencing · notification
 │   │   ├── utils/supabaseAdmin.js   # service_role client
 │   │   └── server.js
+│   ├── __tests__/              # Jest: geo units + supertest boot smoke
 │   └── vercel.json             # Function + cron config
+├── .github/workflows/          # mobile-ci · backend-ci · schema-check · eas-build
 ├── supabase_schema.sql         # Single source of truth - tables, RLS, RPCs, grants
 ├── migrations/                 # Delta files for non-destructive Studio runs
 ├── verify_schema.sql           # Single-row PASS/FAIL diagnostic
+├── zero-to-deploy.md           # Fresh-clone to app-store walkthrough
 ├── PUSH_NOTIFICATIONS.md       # Killed-state delivery playbook
-├── REDESIGN_PLAN.md            # Canonical design language + 100%-wired mandate
-└── HARDENING_NOTES.md          # 28-flaw fix log
+└── HARDENING_NOTES.md          # Backend fix log
 ```
 
 ---
@@ -274,7 +289,7 @@ The geo-fence claim is **DB-persisted with compare-and-set (CAS)** semantics - t
 
 ## Design system
 
-The **`(tabs)/request.tsx`** screen is the locked design reference. Every other screen mirrors its pattern. The full spec lives in `REDESIGN_PLAN.md` §14, but the headline rules are:
+The **`(tabs)/request.tsx`** screen is the locked design reference; every other screen mirrors its pattern. The whole atomic library is built with Tamagui `styled()` over the tokens in `tamagui.config.ts`. The headline rules:
 
 - **Sheet language** - bottom sheet ascends with `-Spacing[5]` overlap; brand accent strip (3 px crimson) + handle on top; spring entrance from `translateY 60`.
 - **Section labels** - uppercase, `FontWeight.black`, `LetterSpacing.widest`, `theme.textMuted`, indented `Spacing[2]`. Questions, not nouns.
@@ -294,7 +309,7 @@ The **`(tabs)/request.tsx`** screen is the locked design reference. Every other 
 | Frame rate on mid-tier Android | **120 FPS** | Reanimated v4 worklets on UI thread; every animation uses `useSharedValue` + `useAnimatedStyle`. |
 | Cold start | < 2 s to first paint | Splash screen until `AuthContext` resolves; `app/index.tsx` redirect gate prevents wrong-default-screen flash. |
 | List scroll | 0 dropped frames | FlashList v2 with `getItemType`, memoized `renderItem`, stable `keyExtractor`. |
-| Map | 60 FPS pan/zoom | `react-native-maps` with `provider={PROVIDER_DEFAULT}`, marker count capped per ring. |
+| Map | 60 FPS pan/zoom | MapLibre with raster OSM/CARTO tiles, marker count capped per ring. |
 | Realtime reconnect | < 5 s | Supabase client default retry; channels named uniquely with `uniqueChannelName(prefix)` to avoid collision on rapid re-mount. |
 | Image cache hit | > 90% | `expo-image` with `cachePolicy="memory-disk"`. |
 
@@ -468,11 +483,11 @@ All tables have RLS policies. The full DDL is generated and version-controlled -
 
 ---
 
-## Roadmap
+- [x] Live donor heartbeat on a map (persistent background location, survives swipe-to-kill)
 
+- [ ] **Donor reputation & verified-badge program** - a trust layer on top of the existing `total_donations` and `is_verified` fields: streak-aware reputation tiers earned through completed donations, on-time arrivals, and recipient confirmations; a verified badge granted after identity + first-donation checks; reputation surfaced on the donor profile and weighted into geo-fence paging order so the most reliable, eligible donors are paged first. All city-anonymised, no public leaderboards of personal data.
 - [ ] Group requests (multiple recipients on a single thread for ward-level needs)
 - [ ] In-app video consult for critical cases (E2EE via the noble crypto stack)
-- [ ] Donor badges + leaderboards (city-anonymised)
 - [ ] Web companion (Next.js) for hospitals to post on behalf of patients
 - [ ] Multilingual UI (Urdu, Hindi, Arabic, Spanish - full RTL where applicable)
 - [ ] Donor-recipient chat with images + voice notes (`expo-audio`, not `expo-av`)
@@ -492,7 +507,7 @@ The geo-fence keeps expanding to country-wide. The request stays active until yo
 Yes - pick "Both" at onboarding. The role gates which tabs you see; "Both" sees everything.
 
 **How is donor eligibility enforced?**
-Age (≥ 18) is server-enforced. The 90-day cooldown is enforced by the `accept_blood_request` RPC. Availability is a profile toggle.
+The donor age window (18-65) is enforced both client-side (zod schema) and server-side. The 90-day cooldown is enforced inside the `accept_blood_request` RPC (race-free). Availability is a profile toggle.
 
 **Why no MMKV?**
 Project decision. `AsyncStorage` covers every use case at our scale, with broader compatibility and zero native-link friction.
@@ -521,15 +536,15 @@ Pull requests are welcome. The bar is high - but the door is open.
 ### Ground rules
 
 1. **One branch per change.** Branch names are kebab-case with a prefix: `feat/`, `fix/`, `chore/`, `docs/`, `refactor/`. Date suffix optional.
-2. **No emojis** in code, copy, or commit messages.
-3. **No `Alert.alert`** for errors - use the `useToast` context.
+2. **No emojis and no em/en dashes** in code, copy, docs, or commit messages. The husky pre-commit guard (`scripts/check-forbidden.mjs`) blocks them.
+3. **No `Alert.alert`** for non-confirmation feedback - use the `toastStore`.
 4. **No `ActivityIndicator`** - use `Skeleton` shaped like the content.
-5. **No hardcoded hex** outside `Colors.ts`. Everything flows through `theme.*` tokens.
+5. **Theme tokens only.** Color, space, type, and radius flow through the Tamagui theme; never hardcode hex outside `tamagui.config.ts` / `Colors.ts`.
 6. **No `react-native-mmkv`.** All persistence is AsyncStorage or `expo-secure-store`.
-7. **No external error monitoring SDKs.**
-8. **Strict TypeScript** - no `any` in new code. Use the SDK's generated types.
-9. **Memoize list cells.** `React.memo`, stable `keyExtractor`, `getItemType` for FlashList.
-10. **Haptic on every interactive `Pressable`.** Selection for toggles, impact for commits.
+7. **No external error monitoring SDKs.** `errorReporter` only.
+8. **Strict TypeScript** - no `any`, no `@ts-ignore`. Use generated/inferred types.
+9. **Reads via TanStack Query, global state via Zustand, forms via RHF + zod.** No `useEffect` data-fetching.
+10. **Reanimated v4 only**, every animation honouring `useReducedMotion`. Haptic on every interactive `Pressable`.
 11. **Skeleton loading only.** Never spinners.
 12. **`npx expo install <pkg>`** - never edit `package.json` versions by hand.
 
@@ -549,13 +564,13 @@ cd mobile && npx eas build --profile development --platform android
 ### Pull-request flow
 
 1. Fork → branch → push.
-2. Open PR against `main`. Title format: `feat(scope): short description` (Conventional Commits).
-3. The PR must:
-   - Pass `tsc --noEmit`.
-   - Pass `expo-doctor`.
-   - Have a screenshot or short video for any UI change.
-   - Have a `Test plan` section describing what you exercised.
-4. Reviewers will check against the [Canonical Design Language](#design-system).
+2. Open PR against `master`. Title format: `feat(scope): short description` (Conventional Commits).
+3. CI must be green. The PR must:
+   - Pass `npm run typecheck` (`tsc --noEmit`), `npm run lint`, and `npm test` (mobile + backend).
+   - Pass `npx expo-doctor` and `npx expo export`.
+   - For schema changes, pass `schema-check` (applies `supabase_schema.sql` against Postgres + `verify_schema.sql`).
+   - Have a screenshot or short video for any UI change, and a `Test plan` section.
+4. Reviewers will check against the [Design system](#design-system).
 
 ### Sponsorship & contact
 
