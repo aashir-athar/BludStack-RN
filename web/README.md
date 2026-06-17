@@ -53,7 +53,7 @@ A workflow is included at `.github/workflows/deploy-web-pages.yml`.
 3. Push to `master` (or run the workflow manually). It builds `web/` and publishes
    `out/` to Pages.
 
-The workflow sets `NEXT_PUBLIC_BASE_PATH=/BludStack` because GitHub project pages
+The workflow sets `NEXT_PUBLIC_BASE_PATH=/BludStack-RN` (the repo name) because GitHub project pages
 serve under `https://<user>.github.io/<repo>`. For a custom domain or a
 `<user>.github.io` repo, set that to an empty string.
 

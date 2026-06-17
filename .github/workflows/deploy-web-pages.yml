@@ -30,9 +30,9 @@ jobs:
         working-directory: web
     env:
       # Project Pages serve under https://<user>.github.io/<repo>, so the app
-      # needs basePath /BludStack. For a custom domain or a <user>.github.io repo,
-      # set this to an empty string.
-      NEXT_PUBLIC_BASE_PATH: /BludStack
+      # needs basePath set to the repo name. For a custom domain or a
+      # <user>.github.io repo, set this to an empty string.
+      NEXT_PUBLIC_BASE_PATH: /BludStack-RN
       NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
       NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
