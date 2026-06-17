@@ -4,14 +4,14 @@
 // holds every switch.
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { LogOut, ShieldCheck } from "lucide-react";
+import { LogOut, ShieldCheck, Pencil } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
 import { reputationProgress, livesHelped } from "@/lib/reputation";
 import { computeAge } from "@/lib/age";
 import { MIN_DONATION_GAP_DAYS } from "@/lib/blood-data";
 import { ReputationBadge } from "@/components/reputation-badge";
-import { Card, BloodGroupBadge, Button, PageHeader } from "@/components/ui";
+import { Card, BloodGroupBadge, Button, PageHeader, LinkButton } from "@/components/ui";
 
 function cooldownDaysLeft(last: string | null): number {
   if (!last) return 0;
@@ -70,6 +70,10 @@ export default function ProfilePage() {
         <Stat value={String(livesHelped(donations))} label="Lives helped" accent />
         <Stat value={String(cooldown)} label="Cooldown days" />
       </Card>
+
+      <LinkButton href="/profile/edit" variant="secondary" fullWidth>
+        <Pencil size={16} /> Edit profile
+      </LinkButton>
 
       {isDonor ? (
         <Card className="flex flex-col gap-4">
