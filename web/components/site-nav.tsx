@@ -39,7 +39,7 @@ export function SiteNav() {
             href="/signin"
             className="hidden rounded-full bg-crimson-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-crimson-600/20 transition-transform hover:bg-crimson-500 active:scale-[0.97] sm:inline-flex"
           >
-            Get the app
+            Use the app
           </Link>
           <button
             type="button"
@@ -71,7 +71,7 @@ export function SiteNav() {
               onClick={() => setOpen(false)}
               className="mt-2 inline-flex items-center justify-center rounded-full bg-crimson-600 px-5 py-3.5 text-base font-semibold text-white active:scale-[0.98]"
             >
-              Get the app
+              Use the app
             </Link>
           </div>
         </div>

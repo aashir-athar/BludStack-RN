@@ -277,7 +277,7 @@ function CallToAction() {
             href="/signin"
             className="inline-flex w-full items-center justify-center rounded-full bg-crimson-600 px-8 py-4 text-base font-semibold text-white shadow-xl shadow-crimson-600/25 transition-transform hover:bg-crimson-500 active:scale-[0.98] sm:w-auto"
           >
-            Get the app
+            Use the app
           </Link>
           <a
             href="https://github.com/aashir-athar/BludStack"
