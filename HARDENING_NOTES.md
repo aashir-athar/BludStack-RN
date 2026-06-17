@@ -143,3 +143,39 @@ After applying the schema, run through this:
 - `op-sqlite` outbox for true offline-first chat (current `useChatMessages` retries optimistically but doesn't persist across app kills)
 
 These are tracked but **not** blocking the release.
+
+---
+
+## Phase F security review: open items for the owner
+
+A security pass over the live-location flow (2026-06-17) confirmed the core
+controls are correct: the heartbeat keys its UPDATE on `donor_id = req.userId`
+from the verified JWT (no client-supplied identity, no IDOR), the TOCTOU window
+is closed by a single conditional UPDATE, coordinates are range-validated in
+three layers, the service_role key is server-only, and privileged columns are
+trigger-guarded. The heartbeat limiter was tightened (15/min, keyed per
+donor+request) and the 409 message no longer echoes internal status. Three items
+remain for the owner:
+
+1. **Verify Supabase Realtime RLS on `request_responses` (do this before launch).**
+   `map/live.tsx` reads live donor `donor_lat/lon` through a `postgres_changes`
+   subscription. Modern Supabase Realtime enforces the table's SELECT RLS on the
+   change stream **only when the channel carries the user's JWT** (supabase-js
+   sets this from the session by default) and Realtime is enabled for the table.
+   Confirm in the dashboard that Realtime authorization is on for
+   `request_responses` so the live stream is gated by `request_responses_select_visible`,
+   exactly like the initial `loadDonors()` SELECT. Optional defense-in-depth:
+   have the recipient branch confirm `blood_requests.recipient_id = auth.uid()`
+   rather than trusting the `role` route param.
+
+2. **Optional: server-side velocity sanity check on heartbeat.** Coordinates are
+   range-valid but otherwise attacker-controlled, so a spoofed GPS track is
+   possible. A cheap haversine velocity gate (flag, do not hard-block, anything
+   over ~300 km/h vs the previous fix) would kill trivially fake tracks without
+   breaking legitimate jumps after tunnels.
+
+3. **Optional: verify the auth JWT locally.** `requireAuth` calls
+   `supabaseAdmin.auth.getUser(token)` on every request (a round-trip to Supabase
+   Auth). On the hot heartbeat path, local signature verification (HS256/JWKS,
+   checking `aud`/`iss`/`exp`) with a fallback to `getUser` only when fresh user
+   state is needed would cut latency and the upstream dependency.
