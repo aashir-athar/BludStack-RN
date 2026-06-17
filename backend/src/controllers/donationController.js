@@ -255,7 +255,9 @@ async function heartbeat(req, res, next) {
         .eq('donor_id',   req.userId)
         .maybeSingle();
       if (!probe) return error(res, "You haven't responded to this request", 404);
-      return error(res, `Heartbeat only for accepted donations (status: ${probe.status})`, 409);
+      // Generic message - the client's terminal-stop keys on the 409 status, not
+      // the string, so there's no need to echo the internal response status back.
+      return error(res, 'This donation is no longer active', 409);
     }
 
     return success(res, { ok: true });

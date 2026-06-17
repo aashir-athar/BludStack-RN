@@ -157,6 +157,16 @@ export function useDonorHeartbeat(
 
     setStatus('requesting');
 
+    // Keepalive: a stationary donor stops producing new fixes (the native
+    // tracker only delivers on movement), which would freeze the recipient's pin
+    // and let the backend treat the session as stale. Re-push the last known fix
+    // on the heartbeat cadence; pushFix's own throttle drops it whenever a real
+    // fix already covered the window, so this never double-sends.
+    const keepalive = setInterval(() => {
+      const c = lastCoordsRef.current;
+      if (c && !disposed && !stoppedRef.current) void pushFix(c);
+    }, HEARTBEAT_MIN_GAP_MS);
+
     (async () => {
       // ── Native, kill-surviving path ──────────────────────────────────────
       if (bg) {
@@ -216,6 +226,7 @@ export function useDonorHeartbeat(
 
     return () => {
       disposed = true;
+      clearInterval(keepalive);
       subscription?.remove();
       subscription = null;
       // Tear down the foreground service so the notification clears the instant

@@ -107,7 +107,7 @@ export default function ProfileScreen() {
 
         <Card variant="elevated" style={{ flexDirection: 'row', alignItems: 'center' }}>
           <View style={{ flex: 1, alignItems: 'center', gap: 2 }}>
-            <Text variant="title" style={{ fontVariant: ['tabular-nums'] }}>{profile.total_donations}</Text>
+            <Text variant="title" style={{ fontVariant: ['tabular-nums'] }}>{donations}</Text>
             <Text variant="overline" tone="muted">Donations</Text>
           </View>
           <View style={{ width: 1, height: 32, backgroundColor: theme.divider }} />

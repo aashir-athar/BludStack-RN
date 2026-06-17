@@ -87,6 +87,8 @@ export default function LiveMapScreen() {
       deniedToldRef.current = true;
       toast.error('Location is off', { description: 'Turn it on so the recipient can see you on the way.' });
     }
+    // Re-arm once tracking resumes, so a later denial is surfaced again.
+    if (hbStatus === 'tracking') deniedToldRef.current = false;
   }, [isDonor, hbStatus, toast]);
 
   // ── Hospital (request) location ────────────────────────────────────────────
@@ -141,8 +143,10 @@ export default function LiveMapScreen() {
     void loadDonors();
     const channel = supabase
       .channel(`live_${requestId}`)
+      // event '*' (not just UPDATE): a donor who accepts after the map is open
+      // arrives as an INSERT, and only re-running loadDonors paints their pin.
       .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'request_responses', filter: `request_id=eq.${requestId}` },
+        { event: '*', schema: 'public', table: 'request_responses', filter: `request_id=eq.${requestId}` },
         () => void loadDonors())
       .subscribe();
     return () => { supabase.removeChannel(channel); };

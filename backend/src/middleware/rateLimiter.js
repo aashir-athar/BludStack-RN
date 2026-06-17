@@ -62,15 +62,18 @@ const notifRateLimiter = rateLimit({
 });
 
 /**
- * Live-location heartbeat limiter - the donor app pushes GPS roughly once every
- * 15-30s while en-route, so ~2-4 req/min is normal. Cap at 40/min per donor to
- * absorb bursts and movement-triggered pushes while blocking a runaway client
- * or a malicious flood. Keyed by donor id (one active commitment at a time).
+ * Live-location heartbeat limiter - the donor app throttles itself to roughly
+ * one push per 30s (or per 50m moved), so ~2-4 req/min is the legitimate ceiling.
+ * Cap at 15/min, keyed per (donor, request) so a single token cannot flood one
+ * request's row or fan a flood across many requests. Generous headroom over the
+ * real cadence while still blocking a runaway or malicious client.
  */
+const heartbeatKey = (req) => `${userOrIpKey(req)}:${(req.body && req.body.requestId) || ''}`;
+
 const heartbeatRateLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 40,
-  keyGenerator: userOrIpKey,
+  max: 15,
+  keyGenerator: heartbeatKey,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
