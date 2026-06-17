@@ -1,0 +1,77 @@
+name: schema-check
+
+# Applies supabase_schema.sql (plus the cooldown migration) against a real
+# Postgres, then runs verify_schema.sql and fails on any FAIL row. ON_ERROR_STOP
+# means a single bad statement fails the job, so this catches DDL / RLS / trigger
+# regressions before they reach Supabase Studio. A CI-only prelude supplies the
+# Supabase surface (auth schema, auth.uid(), roles, realtime publication).
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'supabase_schema.sql'
+      - 'verify_schema.sql'
+      - 'migrations/**'
+      - '.github/ci/supabase-test-prelude.sql'
+      - '.github/workflows/schema-check.yml'
+  pull_request:
+    paths:
+      - 'supabase_schema.sql'
+      - 'verify_schema.sql'
+      - 'migrations/**'
+      - '.github/ci/supabase-test-prelude.sql'
+      - '.github/workflows/schema-check.yml'
+  workflow_dispatch:
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bludstack
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: bludstack
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Apply Supabase compatibility prelude
+        run: psql -v ON_ERROR_STOP=1 -f .github/ci/supabase-test-prelude.sql
+
+      - name: Apply schema
+        # supabase_schema.sql is the source of truth and already folds in every
+        # shipped migration (incl. the cooldown-in-RPC change). Historical
+        # migrations/*.sql are owner-applied deltas in Studio, not replayed here.
+        run: psql -v ON_ERROR_STOP=1 -f supabase_schema.sql
+
+      - name: Re-apply schema (idempotency check)
+        run: psql -v ON_ERROR_STOP=1 -f supabase_schema.sql
+
+      - name: Verify schema (fail on any FAIL row)
+        run: |
+          psql -v ON_ERROR_STOP=1 -t -A -F '|' -f verify_schema.sql > verify_out.txt
+          echo "── verify_schema.sql results"
+          cat verify_out.txt
+          if grep -q '|FAIL' verify_out.txt; then
+            echo "::error::One or more schema checks reported FAIL"
+            exit 1
+          fi
+          echo "All schema checks passed."

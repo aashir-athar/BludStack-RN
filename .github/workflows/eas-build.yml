@@ -1,0 +1,61 @@
+name: eas-build
+
+# Owner-triggered cloud build. Runs on a version tag (v1.2.3) or manual dispatch.
+# Requires the EXPO_TOKEN repository secret (Expo access token). This does not run
+# on every push — device builds cost money and minutes.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to build
+        type: choice
+        default: all
+        options: [all, android, ios]
+      profile:
+        description: EAS build profile
+        type: choice
+        default: production
+        options: [production, preview, development]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: mobile/.nvmrc
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Guard EXPO_TOKEN
+        run: |
+          if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
+            echo "::error::EXPO_TOKEN secret is not set. Add it in repo Settings -> Secrets -> Actions."
+            exit 1
+          fi
+
+      - name: EAS build
+        run: |
+          eas build \
+            --non-interactive \
+            --no-wait \
+            --platform "${{ github.event.inputs.platform || 'all' }}" \
+            --profile "${{ github.event.inputs.profile || 'production' }}"
