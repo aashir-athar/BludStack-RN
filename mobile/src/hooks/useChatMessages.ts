@@ -15,9 +15,13 @@
 //     gated by the accepted-donation relationship between sender/receiver.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/* eslint-disable react-hooks/set-state-in-effect -- this is a realtime data hook:
+   its effects sync Supabase (initial load, realtime, pagination) into React state,
+   and the synchronous loading/reset on param change is intentional, not a cascade. */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Crypto from 'expo-crypto';
 import { supabase } from '@/utils/supabase';
+import { errorReporter } from '@/lib/errorReporter';
 
 export interface ChatMessage {
   id: string;
@@ -72,7 +76,7 @@ export function useChatMessages(
 
       if (cancelled) return;
       if (error) {
-        console.warn('[chat] initial load error', error.message);
+        errorReporter.warn('chat initial load failed', { message: error.message });
         setLoading(false);
         return;
       }
@@ -155,8 +159,8 @@ export function useChatMessages(
         oldestCreatedAtRef.current = older[0].created_at;
       }
       setHasMore((data ?? []).length === PAGE_SIZE);
-    } catch (e: any) {
-      console.warn('[chat] loadOlder error', e?.message);
+    } catch (e) {
+      errorReporter.error(e, { action: 'chat/loadOlder' });
     } finally {
       setFetchingOlder(false);
     }
@@ -194,7 +198,7 @@ export function useChatMessages(
       });
 
     if (error) {
-      console.warn('[chat] send failed', error.message);
+      errorReporter.warn('chat send failed', { message: error.message });
       setMessages(prev =>
         prev.map(x => x.client_id === clientId ? { ...x, _status: 'failed' } : x),
       );

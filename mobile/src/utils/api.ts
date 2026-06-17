@@ -122,6 +122,8 @@ export const apiUpdateProfile = (patch: ProfilePatch) =>
 export const apiUpdateLocation = (latitude: number, longitude: number) =>
   request<unknown>('PATCH', '/profiles/me/location', { latitude, longitude });
 
+export const apiGetProfile = (id: string) => request<unknown>('GET', `/profiles/${id}`);
+
 export type NearbyDonorsQuery = { lat: number; lon: number; radiusKm?: number; bloodGroup?: string };
 export const apiNearbyDonors = (q: NearbyDonorsQuery) => {
   const qs = new URLSearchParams({
