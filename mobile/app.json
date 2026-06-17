@@ -51,7 +51,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "BludStack needs your location to find blood requests near you and to share your live position with the recipient after you accept."
         }
-      ]
+      ],
+      "expo-persistent-background-location"
     ],
     "experiments": {
       "typedRoutes": true,

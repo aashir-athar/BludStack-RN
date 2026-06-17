@@ -1,32 +1,61 @@
 // hooks/useDonorHeartbeat.ts
-// Push the donor's live GPS to /donations/heartbeat while they're en-route to
-// the hospital. The recipient subscribes to realtime UPDATEs on
-// request_responses and renders a moving pin on /map/live.
+// ─────────────────────────────────────────────────────────────────────────────
+// A donor who accepted a request shares their live position with the recipient
+// until they arrive. This is the hardest reliability problem in the app: the
+// donor is driving, the screen is off, the OS wants to reclaim the process.
 //
-// Foreground-only — when the donor backgrounds the app the watcher stops.
-// This matches Uber's actual "driver" UX (you keep the app open while
-// driving). Background-location is opt-in via a system permission prompt
-// and adds complexity / battery cost we don't justify yet.
+// expo-persistent-background-location solves the survival half — a `location`-
+// typed foreground service on Android (survives swipe-to-kill) and significant-
+// location-change monitoring on iOS (resumes after force-quit). We own the
+// delivery half: each fix is POSTed to /donations/heartbeat under the donor's
+// Supabase identity, which writes request_responses.donor_lat/lon. The recipient
+// subscribes to realtime UPDATEs and renders a moving pin on /map/live.
 //
-// Heartbeat policy:
-//   • Push every 30 seconds OR every 50 metres of movement, whichever first.
-//   • Stop on unmount, on hook-disabled, or on a server 400/404 (donor no
-//     longer accepted on this request).
+// The native module's own `syncUrl` can't carry our rotating Bearer token or
+// match the endpoint's body contract, so JS drives the writes while the native
+// service keeps the fixes flowing even when the runtime is backgrounded.
+//
+// Lever: commitment + consistency. Once a donor says "I'm coming," a moving dot
+// on the recipient's screen is the proof that holds them to it.
+//
+// Graceful degradation: in Expo Go (no native module) we fall back to
+// expo-location foreground watching, so the donor still shares a position while
+// the app is open, just without the kill-survival guarantee.
+//
+// Heartbeat policy: push every 30s OR every 50m of movement, whichever first,
+// to stay well under the backend rate limiter and easy on the battery. Stop on
+// unmount, on disable, or on a terminal 400/404/409 (donor no longer accepted).
+// ─────────────────────────────────────────────────────────────────────────────
 
-import { useEffect, useRef } from 'react';
+/* eslint-disable react-hooks/set-state-in-effect -- this hook syncs an imperative
+   external system (the GPS / native foreground service) into React state: the
+   effect brings up tracking and updates status/coords as fixes arrive. That is a
+   subscription, not a render cascade. */
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Location from 'expo-location';
-import { apiDonationHeartbeat } from '@/utils/api';
+import { apiDonationHeartbeat, isApiError } from '@/utils/api';
 import { errorReporter } from '@/lib/errorReporter';
 
-const HEARTBEAT_MIN_GAP_MS    = 30_000;
-const HEARTBEAT_MIN_DELTA_M   = 50;
-const LOCATION_TIME_INTERVAL  = 15_000; // watcher firing interval
-const LOCATION_DISTANCE_DELTA = 25;
+export interface HeartbeatCoords {
+  latitude: number;
+  longitude: number;
+}
 
-function metresBetween(
-  a: { latitude: number; longitude: number },
-  b: { latitude: number; longitude: number },
-): number {
+export type HeartbeatStatus = 'idle' | 'requesting' | 'tracking' | 'denied' | 'stopped';
+
+interface UseDonorHeartbeatReturn {
+  coords: HeartbeatCoords | null;
+  status: HeartbeatStatus;
+  /** True while a native foreground service / fallback watcher is delivering fixes. */
+  tracking: boolean;
+}
+
+const HEARTBEAT_MIN_GAP_MS  = 30_000;
+const HEARTBEAT_MIN_DELTA_M = 50;
+const WATCH_TIME_INTERVAL   = 15_000;
+const WATCH_DISTANCE_DELTA  = 25;
+
+function metresBetween(a: HeartbeatCoords, b: HeartbeatCoords): number {
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
   const dLat = toRad(b.latitude - a.latitude);
@@ -37,84 +66,163 @@ function metresBetween(
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
-export function useDonorHeartbeat(requestId: string | undefined, enabled: boolean) {
-  const subRef         = useRef<Location.LocationSubscription | null>(null);
-  const lastPushAtRef  = useRef<number>(0);
-  const lastCoordsRef  = useRef<{ latitude: number; longitude: number } | null>(null);
-  const fatalErrorRef  = useRef<boolean>(false);
+// The persistent module is native — absent in Expo Go. Resolve it lazily so
+// importing this hook never crashes the bundle on a client that lacks the build.
+type BgModule = typeof import('expo-persistent-background-location');
+function loadBgModule(): BgModule | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('expo-persistent-background-location') as BgModule;
+  } catch {
+    return null;
+  }
+}
 
-  useEffect(() => {
-    if (!enabled || !requestId) return;
-    fatalErrorRef.current = false;
+const FOREGROUND_NOTIFICATION = {
+  notificationTitle: 'Sharing your live location',
+  notificationBody: 'The recipient can see you on the way. Tap to return.',
+  notificationChannelId: 'bludstack_live_location',
+  notificationChannelName: 'Live location sharing',
+  notificationColor: '#E5314F', // crimson500 — keeps the service notification on-brand
+} as const;
 
-    // Race-guard: when the deps flip mid-setup, the async IIFE might still be
-    // awaiting (permission prompt or watchPositionAsync). Without this flag,
-    // the watcher gets assigned to subRef AFTER the cleanup ran — leaking a
-    // background GPS subscription. We check the flag before every async
-    // continuation and inside the watcher callback.
-    let cancelled = false;
+/**
+ * @param requestId  The request being fulfilled.
+ * @param enabled    Drive tracking on/off (donor role, donation still accepted).
+ */
+export function useDonorHeartbeat(
+  requestId: string | undefined,
+  enabled: boolean,
+): UseDonorHeartbeatReturn {
+  const [coords, setCoords] = useState<HeartbeatCoords | null>(null);
+  const [status, setStatus] = useState<HeartbeatStatus>('idle');
 
-    (async () => {
-      const { status } = await Location.getForegroundPermissionsAsync();
-      if (cancelled) return;
-      if (status !== 'granted') {
-        const req = await Location.requestForegroundPermissionsAsync();
-        if (cancelled) return;
-        if (req.status !== 'granted') return;
-      }
+  // Throttle/terminal bookkeeping. Touched only inside callbacks and effects,
+  // never read during render.
+  const lastPushAtRef = useRef(0);
+  const lastCoordsRef = useRef<HeartbeatCoords | null>(null);
+  const stoppedRef    = useRef(false);
 
-      const sub = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.High,
-          timeInterval: LOCATION_TIME_INTERVAL,
-          distanceInterval: LOCATION_DISTANCE_DELTA,
-        },
-        async (pos) => {
-          if (cancelled || fatalErrorRef.current) return;
-          const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
-          const now = Date.now();
-          const last = lastCoordsRef.current;
-          const movedEnough = !last || metresBetween(last, coords) >= HEARTBEAT_MIN_DELTA_M;
-          const cooledDown  = now - lastPushAtRef.current >= HEARTBEAT_MIN_GAP_MS;
-          if (!movedEnough && !cooledDown) return;
+  // Throttled push to the backend — the source of truth for the recipient's
+  // live pin. A terminal 400/404/409 means the donation is no longer accepted:
+  // stand down for good.
+  const pushFix = useCallback(async (c: HeartbeatCoords) => {
+    if (!requestId || stoppedRef.current) return;
 
-          try {
-            await apiDonationHeartbeat(requestId, coords.latitude, coords.longitude);
-            if (cancelled) return;
-            lastPushAtRef.current = now;
-            lastCoordsRef.current = coords;
-          } catch (e: any) {
-            // 400/404 = donor no longer accepted, 409 = response status is
-            // no longer 'accepted' (TOCTOU-safe heartbeat). All three mean
-            // "stop pushing — we're done here".
-            const status = e?.status as number | undefined;
-            if (status === 400 || status === 404 || status === 409) {
-              fatalErrorRef.current = true;
-              subRef.current?.remove();
-              subRef.current = null;
-              return;
-            }
-            errorReporter.warn('Heartbeat failed', { requestId, message: e?.message });
-          }
-        },
-      );
+    const now  = Date.now();
+    const last = lastCoordsRef.current;
+    const movedEnough = !last || metresBetween(last, c) >= HEARTBEAT_MIN_DELTA_M;
+    const cooledDown  = now - lastPushAtRef.current >= HEARTBEAT_MIN_GAP_MS;
+    if (!movedEnough && !cooledDown) return;
 
-      // If the effect was cancelled while watchPositionAsync was awaiting,
-      // we must tear down the freshly-created watcher immediately — never
-      // store it in subRef.
-      if (cancelled) {
-        sub.remove();
+    try {
+      await apiDonationHeartbeat(requestId, c.latitude, c.longitude);
+      lastPushAtRef.current = now;
+      lastCoordsRef.current = c;
+    } catch (err) {
+      if (isApiError(err) && (err.status === 400 || err.status === 404 || err.status === 409)) {
+        stoppedRef.current = true;
+        setStatus('stopped');
         return;
       }
-      subRef.current = sub;
+      // Transient (offline / 5xx) — the next fix retries; native buffer holds
+      // positions while the runtime is gone.
+      errorReporter.warn('Heartbeat failed', {
+        requestId,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [requestId]);
+
+  useEffect(() => {
+    if (!enabled || !requestId) {
+      setStatus('idle');
+      return;
+    }
+
+    stoppedRef.current   = false;
+    lastPushAtRef.current = 0;
+    lastCoordsRef.current = null;
+    let disposed = false;
+    const bg = loadBgModule();
+    // EventSubscription | Location.LocationSubscription — both expose remove().
+    let subscription: { remove: () => void } | null = null;
+
+    const onFix = (c: HeartbeatCoords) => {
+      if (disposed || stoppedRef.current) return;
+      setCoords(c);
+      setStatus('tracking');
+      void pushFix(c);
+    };
+
+    setStatus('requesting');
+
+    (async () => {
+      // ── Native, kill-surviving path ──────────────────────────────────────
+      if (bg) {
+        try {
+          const perm = await bg.requestPermissions({ background: true });
+          if (disposed) return;
+          if (perm.foreground !== 'granted') {
+            setStatus('denied');
+            return;
+          }
+
+          subscription = bg.onLocation((fix) => onFix({ latitude: fix.latitude, longitude: fix.longitude }));
+
+          await bg.start({
+            accuracy: 'high',
+            distanceFilter: WATCH_DISTANCE_DELTA, // metres — granular enough for an ETA, gentle on battery
+            interval: WATCH_TIME_INTERVAL,
+            stopOnTerminate: false,   // survive swipe-to-kill (the whole point)
+            restartOnBoot: true,
+            useSignificantChanges: true,
+            showsBackgroundLocationIndicator: true,
+            activityType: 'automotiveNavigation',
+            foregroundService: FOREGROUND_NOTIFICATION,
+          });
+          if (disposed) return;
+
+          // Seed an immediate fix so the recipient sees the dot without waiting
+          // for the first interval tick.
+          try {
+            const first = await bg.getCurrentPosition({ accuracy: 'high' });
+            if (!disposed) onFix({ latitude: first.latitude, longitude: first.longitude });
+          } catch {
+            // first fix is best-effort; the listener delivers shortly
+          }
+          return;
+        } catch (err) {
+          errorReporter.warn('bg-location start failed, using foreground fallback', {
+            message: err instanceof Error ? err.message : String(err),
+          });
+          // fall through to the expo-location fallback
+        }
+      }
+
+      // ── Foreground fallback (Expo Go / native start failed) ──────────────
+      const { status: fg } = await Location.requestForegroundPermissionsAsync();
+      if (disposed) return;
+      if (fg !== 'granted') {
+        setStatus('denied');
+        return;
+      }
+      subscription = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.High, timeInterval: WATCH_TIME_INTERVAL, distanceInterval: WATCH_DISTANCE_DELTA },
+        (pos) => onFix({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+      );
+      if (disposed) subscription.remove();
     })();
 
     return () => {
-      cancelled = true;
-      subRef.current?.remove();
-      subRef.current = null;
-      lastPushAtRef.current = 0;
-      lastCoordsRef.current = null;
+      disposed = true;
+      subscription?.remove();
+      subscription = null;
+      // Tear down the foreground service so the notification clears the instant
+      // the donor leaves the screen / the donation closes. Cleanup is the game.
+      if (bg) void bg.stop().catch(() => {});
     };
-  }, [requestId, enabled]);
+  }, [requestId, enabled, pushFix]);
+
+  return { coords, status, tracking: status === 'tracking' };
 }
