@@ -46,9 +46,9 @@ function GeoRings() {
           <MapPin size={14} />
         </span>
       ))}
-      {/* Center: the request */}
-      <div className="absolute left-1/2 top-1/2 flex size-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-crimson-600 text-white shadow-2xl shadow-crimson-600/40 [animation:var(--animate-float)] motion-reduce:[animation:none] sm:size-24">
-        <BrandMark size={42} />
+      {/* Center: the request, marked by the real logo */}
+      <div className="absolute left-1/2 top-1/2 flex size-24 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-onyx-900/80 shadow-2xl shadow-crimson-600/40 ring-1 ring-crimson-500/30 backdrop-blur [animation:var(--animate-float)] motion-reduce:[animation:none] sm:size-28">
+        <BrandMark size={66} />
       </div>
     </div>
   );
