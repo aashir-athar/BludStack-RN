@@ -1,11 +1,11 @@
 -- ─────────────────────────────────────────────────────────────────────────────
--- Migration: 2026-05-14 — hardening pass (review findings #2, #3, #4, #8)
+-- Migration: 2026-05-14 - hardening pass (review findings #2, #3, #4, #8)
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Run once in Supabase Studio → SQL Editor. Idempotent and safe to re-run.
 --
 -- What changes:
 --   #2  Adds a CHECK constraint on request_responses that enforces coherence
---       between donor_lat / donor_lon / donor_location_updated_at — either all
+--       between donor_lat / donor_lon / donor_location_updated_at - either all
 --       three null or all three not null.
 --   #3  Pins OWNER of the SECURITY DEFINER RPCs to service_role so the trigger
 --       guards' `current_user = 'service_role'` short-circuit fires regardless
@@ -21,7 +21,7 @@
 --   #8  Recreates accept_blood_request with a SELECT … FOR UPDATE on the
 --       donor's profile row before the one-active-commitment check. This
 --       serialises concurrent accepts on different requests by the same
---       donor — they no longer race past the guard.
+--       donor - they no longer race past the guard.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 set search_path = public;
@@ -36,7 +36,7 @@ do $$ begin
     where ( donor_lat is null) <> (donor_lon is null)
        or ( donor_lat is null) <> (donor_location_updated_at is null)
   ) then
-    raise exception 'request_responses contains incoherent donor_lat/donor_lon/donor_location_updated_at rows — clean before adding the constraint';
+    raise exception 'request_responses contains incoherent donor_lat/donor_lon/donor_location_updated_at rows - clean before adding the constraint';
   end if;
 
   if not exists (
@@ -68,7 +68,7 @@ create trigger blood_requests_fulfilled_at
   before update on public.blood_requests
   for each row execute function public.tg_set_fulfilled_at();
 
--- ── #8.  accept_blood_request — donor profile lock before commitment check ──
+-- ── #8.  accept_blood_request - donor profile lock before commitment check ──
 create or replace function public.accept_blood_request(
   p_request_id uuid,
   p_donor_id   uuid
@@ -132,7 +132,7 @@ begin
     return;
   end if;
 
-  -- ONE-ACTIVE-COMMITMENT — lock the donor's profile row so two concurrent
+  -- ONE-ACTIVE-COMMITMENT - lock the donor's profile row so two concurrent
   -- accepts on DIFFERENT requests by the same donor are forced to serialise.
   -- Without this lock, each call would only lock its own blood_requests row
   -- and both could observe v_other_commitment = null at the same time.
@@ -150,7 +150,7 @@ begin
 
   if v_other_commitment is not null then
     return query select null::uuid, null::response_status_enum,
-      'You already committed to another active request — complete or cancel that one first';
+      'You already committed to another active request - complete or cancel that one first';
     return;
   end if;
 
@@ -175,7 +175,7 @@ begin
   return query select v_resp_id, 'accepted'::response_status_enum, 'OK'::text;
 end $$;
 
--- ── #4b. complete_blood_donation — no donor_id write, fulfilled_at via trigger
+-- ── #4b. complete_blood_donation - no donor_id write, fulfilled_at via trigger
 create or replace function public.complete_blood_donation(
   p_request_id uuid,
   p_donor_id   uuid,

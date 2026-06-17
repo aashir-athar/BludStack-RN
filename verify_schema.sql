@@ -1,4 +1,4 @@
--- verify_schema.sql — single-result diagnostic.
+-- verify_schema.sql - single-result diagnostic.
 -- Run in Supabase Studio → SQL Editor. Returns one combined table with one
 -- row per check, ordered by importance. Any row with ok=false is the problem.
 

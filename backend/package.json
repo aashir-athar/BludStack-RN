@@ -1,7 +1,7 @@
 {
   "name": "bludstack-backend",
   "version": "1.0.0",
-  "description": "BludStack API — blood donation matching backend",
+  "description": "BludStack API - blood donation matching backend",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",

@@ -7,7 +7,7 @@
 -- Why: the cooldown was previously checked only in the Node controller
 -- (donationController.acceptRequest) BEFORE calling the RPC. Two concurrent
 -- accept requests for the same donor could both read last_donation_date, both
--- pass the JS check, and both reach the RPC — a TOCTOU race that could let a
+-- pass the JS check, and both reach the RPC - a TOCTOU race that could let a
 -- donor accept while still inside their cooldown window. Enforcing it in the
 -- same locked transaction as the capacity + one-commitment checks closes the
 -- window completely. The controller keeps a fast, friendly pre-check, but the
@@ -42,7 +42,7 @@ declare
   v_available         boolean;
 begin
   -- Lock the request row for the duration of this transaction.
-  -- Every column reference is alias-qualified — without that, PG treats
+  -- Every column reference is alias-qualified - without that, PG treats
   -- "status" as ambiguous between the table column and the RETURNS TABLE
   -- output column with the same name (error 42702).
   select br.status, br.recipient_id, br.units_needed
@@ -88,10 +88,10 @@ begin
   end if;
 
   -- ────────────────────────────────────────────────────────────────────────
-  -- DONOR ELIGIBILITY (availability + 90-day cooldown) — race-free
+  -- DONOR ELIGIBILITY (availability + 90-day cooldown) - race-free
   -- ────────────────────────────────────────────────────────────────────────
   -- Lock the donor's profile row (serialises concurrent accepts for this
-  -- donor — see the one-active-commitment note below) AND read the fields that
+  -- donor - see the one-active-commitment note below) AND read the fields that
   -- gate eligibility in the same lock, so availability + cooldown are enforced
   -- authoritatively inside the transaction rather than in a racy app-layer
   -- pre-check.
@@ -141,7 +141,7 @@ begin
 
   if v_other_commitment is not null then
     return query select null::uuid, null::response_status_enum,
-      'You already committed to another active request — complete or cancel that one first';
+      'You already committed to another active request - complete or cancel that one first';
     return;
   end if;
 
